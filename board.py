@@ -25,22 +25,22 @@ class HexBoard:
 		"""Verifica si el jugador ha conectado sus dos lados.
 
 		Convención usada:
-		- Jugador 1 (id=1) conecta TOP (fila 0) a BOTTOM (fila size-1).
-		- Jugador 2 (id=2) conecta LEFT (columna 0) a RIGHT (columna size-1).
+		- Jugador 1 (id=1) conecta LEFT (columna 0) a RIGHT (columna size-1).
+		- Jugador 2 (id=2) conecta TOP (fila 0) a BOTTOM (fila size-1).
 		"""
 		visited = [[False] * self.size for _ in range(self.size)]
 		stack: List[Tuple[int, int]] = []
 
 		if player_id == 1:
-			# partir de todas las celdas de la fila superior ocupadas por el jugador
-			for c in range(self.size):
-				if self.board[0][c] == 1:
-					stack.append((0, c))
-					visited[0][c] = True
-			target_row = self.size - 1
+			# partir de todas las celdas de la columna izquierda ocupadas por el jugador
+			for r in range(self.size):
+				if self.board[r][0] == 1:
+					stack.append((r, 0))
+					visited[r][0] = True
+			target_col = self.size - 1
 			while stack:
 				r, c = stack.pop()
-				if r == target_row:
+				if c == target_col:
 					return True
 				for nr, nc in self._neighbors(r, c):
 					if 0 <= nr < self.size and 0 <= nc < self.size and not visited[nr][nc] and self.board[nr][nc] == player_id:
@@ -49,15 +49,15 @@ class HexBoard:
 			return False
 
 		elif player_id == 2:
-			# partir de todas las celdas de la columna izquierda ocupadas por el jugador
-			for r in range(self.size):
-				if self.board[r][0] == 2:
-					stack.append((r, 0))
-					visited[r][0] = True
-			target_col = self.size - 1
+			# partir de todas las celdas de la fila superior ocupadas por el jugador
+			for c in range(self.size):
+				if self.board[0][c] == 2:
+					stack.append((0, c))
+					visited[0][c] = True
+			target_row = self.size - 1
 			while stack:
 				r, c = stack.pop()
-				if c == target_col:
+				if r == target_row:
 					return True
 				for nr, nc in self._neighbors(r, c):
 					if 0 <= nr < self.size and 0 <= nc < self.size and not visited[nr][nc] and self.board[nr][nc] == player_id:
