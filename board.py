@@ -70,9 +70,6 @@ class HexBoard:
 
 	def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
 		# Vecinos en un tablero hexagonal (offset coordinates).
-		# Usamos "even-r" horizontal layout: filas pares desplazadas a la derecha.
-		# Devuelve vecinos en sentido horario (clockwise) empezando por arriba-izquierda.
-		# even-r horizontal layout: even rows (r % 2 == 0) are shifted right
 		if r % 2 != 0:  # fila par
 			return [
 				(r - 1, c - 1),    # arriba-izquierda   NW
