@@ -1,13 +1,36 @@
 from player import Player
 from board import HexBoard
 from typing import List, Tuple, Optional
+import sys
 
 
 class SmartPlayer(Player):
     def play(self, board: HexBoard) -> tuple:
-        #  Tu lógica aquí
-        pass
+        own_graph = HexNodeGraph()
+        own_graph.create_node_matrix(board.size, orientation=self.player_id)
 
+        opponent_id = 2 if self.player_id == 1 else 1
+        opp_graph = HexNodeGraph()
+        opp_graph.create_node_matrix(board.size, orientation=opponent_id)
+
+        best_move = None
+        if board.size <= 7:
+            # Usar minimax solo en tableros pequenos para controlar coste.
+            _, best_move = minimax(
+                turno=0,
+                profundidad=3,
+                grafo_propio=own_graph,
+                grafo_oponente=opp_graph,
+                best_alpha=-(sys.maxsize + 1),
+                best_beta=sys.maxsize,
+                best_casilla=None,
+            )
+
+        if best_move is not None:
+            return best_move
+        
+        # Algo raro
+        return (-1, -1)
 
 class Node:
     def __init__(self, r: int, c: int):
@@ -92,6 +115,8 @@ class HexNodeGraph:
         self.extreme2 = Node(-2, -2)
         self.extreme1.neighbors = []
         self.extreme2.neighbors = []
+        self.extreme1.marked = True
+        self.extreme2.marked = True
 
         if orientation == 1:
             # Conectar extremos a las columnas izquierda y derecha
@@ -254,6 +279,30 @@ class HexNodeGraph:
 
         node.marked = True
 
+    def is_any_adjacent_marked(self, r: int, c: int) -> bool:
+        """
+        Devuelve True si alguno de los nodos adyacentes al nodo en (r, c)
+        tiene `marked == True`. Levanta `IndexError` si la matriz no existe o
+        las coordenadas están fuera de rango, y `ValueError` si la posición
+        (r,c) es `None` (nodo eliminado).
+        """
+        if not self.matrix:
+            raise IndexError("matrix is empty")
+        size = len(self.matrix)
+        if not (0 <= r < size and 0 <= c < size):
+            raise IndexError("coordinates out of range")
+
+        source = self.matrix[r][c]
+        if source is None:
+            raise ValueError("source node is None")
+
+        for neigh in source.neighbors:
+            if neigh is None:
+                continue
+            if getattr(neigh, "marked", False):
+                return True
+        return False
+
     def clone_and_mark(self, r: int, c: int) -> "HexNodeGraph":
         """
         Clona este `HexNodeGraph` usando `clone()` y marca la posición (r, c)
@@ -266,6 +315,19 @@ class HexNodeGraph:
         """
         new_graph = self.clone()
         new_graph.mark_node_at(r, c)
+        return new_graph
+
+    def clone_and_remove(self, r: int, c: int) -> "HexNodeGraph":
+        """
+        Clona este `HexNodeGraph` y elimina la posición (r, c) en la copia.
+
+        - Realiza `clone()` y después llama a `remove_node_at(r, c)` sobre la
+            copia para no modificar el grafo original.
+        - Propaga las mismas excepciones que `remove_node_at` si las
+            coordenadas no son válidas o la posición ya es `None`.
+        """
+        new_graph = self.clone()
+        new_graph.remove_node_at(r, c)
         return new_graph
 
     def distance_between_extremes(self, stop_on_first: bool = True) -> Optional[int]:
@@ -378,6 +440,7 @@ class HexNodeGraph:
         new.matrix = new_matrix
         return new
 
+
 def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) -> Optional[int]:
     """
     Calcula la heurística basada en la distancia entre extremos de dos
@@ -401,3 +464,90 @@ def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) 
 
     return d_opponent - d_self
 
+def _is_cell_available(
+    grafo_propio: HexNodeGraph,
+    grafo_oponente: HexNodeGraph,
+    r: int,
+    c: int,
+) -> bool:
+    node_self = grafo_propio.matrix[r][c]
+    node_opp = grafo_oponente.matrix[r][c]
+    if node_self is None or node_opp is None:
+        return False
+    return (not node_self.marked) and (not node_opp.marked)
+
+def minimax(
+    turno: int,
+    profundidad: int,
+    grafo_propio: HexNodeGraph,
+    grafo_oponente: HexNodeGraph,
+    alpha: int = -sys.maxsize - 1,
+    beta: int = sys.maxsize,
+    maximizing: bool = True,          # más claro que turno % 2
+) -> Tuple[int, Optional[Tuple[int, int]]]:
+    """
+    Retorna (valor, mejor_jugada) — la jugada solo es válida en la raíz (turno=0)
+    """
+    size = grafo_propio.size  # asumo que tienes .size
+
+    # 1. Profundidad máxima → hoja
+    if turno >= profundidad:
+        val = calculate_heuristic(grafo_propio, grafo_oponente)
+        return val, None
+
+    # 2. Obtener movimientos legales (lista para poder ordenar)
+    moves = []
+    for r in range(size):
+        for c in range(size):
+            if _is_cell_available(grafo_propio, grafo_oponente, r, c):
+                moves.append((r, c))
+
+    if not moves:
+        # Tablero lleno sin ganador (raro en HEX, pero por si acaso)
+        return calculate_heuristic(grafo_propio, grafo_oponente), None
+
+    # 3. Ordenar movimientos (crucial para α-β)
+    # Ejemplo simple: ordenar por cercanía a bordes o por heurística rápida
+    # moves.sort(key=lambda m: quick_score_move(grafo_propio, grafo_oponente, m[0], m[1]), reverse=maximizing)
+
+    best_move = None
+
+    if maximizing:  # turno propio (MAX)
+        max_eval = -sys.maxsize - 1
+        for r, c in moves:
+            clonado_p = grafo_propio.clone_and_mark(r, c)
+            clonado_o = grafo_oponente.clone_and_remove(r, c)
+           
+            # Si la nueva casilla está adyacente a alguna marcada,
+            # propagar los adyacentes al extremo correspondiente.
+            if clonado_p.is_any_adjacent_marked(r, c):
+                clonado_p.add_adjacents_to_node(r, c)
+
+            eval, _ = minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, False)
+            if eval > max_eval:
+                max_eval = eval
+                if turno == 0:
+                    best_move = (r, c)
+            alpha = max(alpha, eval)
+            if beta <= alpha:
+                break  # corte α-β
+        return max_eval, best_move
+
+    else:  # turno oponente (MIN)
+        min_eval = sys.maxsize
+        for r, c in moves:
+            clonado_o = grafo_oponente.clone_and_mark(r, c)
+            clonado_p = grafo_propio.clone_and_remove(r, c)  
+            
+            # Si la nueva casilla está adyacente a alguna marcada,
+            # propagar los adyacentes al extremo correspondiente.
+            if clonado_o.is_any_adjacent_marked(r, c):
+                clonado_o.add_adjacents_to_node(r, c)
+            
+            eval, _ = minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, True)
+            if eval < min_eval:
+                min_eval = eval
+            beta = min(beta, eval)
+            if beta <= alpha:
+                break  # corte
+        return min_eval, None
