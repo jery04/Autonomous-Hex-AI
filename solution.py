@@ -5,22 +5,51 @@ import sys
 
 
 class SmartPlayer(Player):
-    def play(self, board: HexBoard) -> tuple:
-        own_graph = HexNodeGraph()
-        own_graph.create_node_matrix(board.size, orientation=self.player_id)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.own_graph = None
+        self.opp_graph = None
 
-        opponent_id = 2 if self.player_id == 1 else 1
-        opp_graph = HexNodeGraph()
-        opp_graph.create_node_matrix(board.size, orientation=opponent_id)
+    def update_graphs(self, board: HexBoard) -> None:
+        """Ensure graphs exist and sync them with the provided `board`.
+
+        Crea los grafos si no existen, inicializa la copia del tablero en
+        `HexNodeGraph.hex_board` y detecta la última jugada del oponente
+        actualizando ambos grafos según corresponda.
+        """
+        # Reuse existing graphs if present; create them if not.
+        if self.own_graph is None or self.opp_graph is None:
+            self.own_graph = HexNodeGraph()
+            self.own_graph.create_node_matrix(board.size, orientation=self.player_id)
+            
+            opponent_id = 2 if self.player_id == 1 else 1
+            self.opp_graph = HexNodeGraph()
+            self.opp_graph.create_node_matrix(board.size, orientation=opponent_id)
+            
+            HexNodeGraph.hex_board = board.clone()  # inicializar la copia del tablero en la clase
+
+        opp_move = HexNodeGraph.detect_opponent_move(board, self.own_graph.player)
+        if opp_move is not None:
+            self.opp_graph.mark_node_at(*opp_move)
+
+            if self.opp_graph.is_any_adjacent_marked(*opp_move):
+                self.opp_graph.add_adjacents_to_node(*opp_move)
+            
+            self.own_graph.remove_node_at(*opp_move)
+
+    def play(self, board: HexBoard) -> tuple:
+        # Sincronizar y actualizar grafos a partir del tablero
 
         best_move = None
         if board.size <= 7:
+            self.update_graphs(board)
+            
             # Usar minimax solo en tableros pequenos para controlar coste.
             _, best_move = minimax(
                 turno=0,
                 profundidad=3,
-                grafo_propio=own_graph,
-                grafo_oponente=opp_graph,
+                grafo_propio=self.own_graph,
+                grafo_oponente=self.opp_graph,
                 best_alpha=-(sys.maxsize + 1),
                 best_beta=sys.maxsize,
                 best_casilla=None,
@@ -66,8 +95,53 @@ class HexNodeGraph:
         self.extreme1: Optional[Node] = None
         self.extreme2: Optional[Node] = None
         self.player: Optional[int] = None
-        self.hex_board: Optional[HexBoard] = None
         self.min_distance: Optional[int] = None
+
+    # Campo estático compartido por todas las instancias
+    hex_board: Optional[HexBoard] = None
+
+    @staticmethod
+    def detect_opponent_move(board: HexBoard, player: Optional[int]) -> Optional[Tuple[int, int]]:
+        """
+        Recibe un `HexBoard`, guarda una copia en `hex_board` y devuelve
+        la coordenada (row, col) de una nueva ficha puesta por el adversario
+        (id opuesto a `self.player`) comparando con la última copia guardada.
+
+        - Si no hay `self.player` definido, devuelve None.
+        - Si no había tablero previo guardado, sólo guarda el tablero y devuelve None.
+        - Si detecta múltiples cambios devuelve la primera encontrada.
+        """
+        
+        if player not in (1, 2):
+            return None
+
+        opponent_id = 2 if player == 1 else 1
+
+        # Si no hay tablero previo, almacenar y salir (variable de clase)
+        if HexNodeGraph.hex_board is None:
+            HexNodeGraph.hex_board = board.clone()
+            return None
+
+        prev = HexNodeGraph.hex_board.board
+        curr = board.board
+
+        if len(prev) != len(curr):
+            # tamaños distintos: actualizar y salir
+            HexNodeGraph.hex_board = board.clone()
+            return None
+
+        size = len(curr)
+        for r in range(size):
+            for c in range(size):
+                # detectar cualquier cambio en la posición que ahora pertenece
+                # al adversario; terminar y devolver la primera encontrada
+                if prev[r][c] != curr[r][c] and curr[r][c] == opponent_id:
+                    HexNodeGraph.hex_board = board.clone()
+                    return (r, c)
+
+        # si no se detectó nada nuevo, actualizar la copia y devolver None
+        HexNodeGraph.hex_board = board.clone()
+        return None
 
     def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
         # Vecinos en un tablero hexagonal (offset coordinates).
@@ -183,47 +257,6 @@ class HexNodeGraph:
                     in_matrix = "(not in matrix)"
 
                 print(f" - {n} -> neighbors: {adj}; matrix[{n.r}][{n.c}] = {in_matrix}")
-
-    def detect_opponent_move(self, board: HexBoard) -> Optional[Tuple[int, int]]:
-        """
-        Recibe un `HexBoard`, guarda una copia en `self.hex_board` y devuelve
-        la coordenada (row, col) de una nueva ficha puesta por el adversario
-        (id opuesto a `self.player`) comparando con la última copia guardada.
-
-        - Si no hay `self.player` definido, devuelve None.
-        - Si no había tablero previo guardado, sólo guarda el tablero y devuelve None.
-        - Si detecta múltiples cambios devuelve la primera encontrada.
-        """
-        if self.player not in (1, 2):
-            return None
-
-        opponent_id = 2 if self.player == 1 else 1
-
-        # Si no hay tablero previo, almacenar y salir
-        if self.hex_board is None:
-            self.hex_board = board.clone()
-            return None
-
-        prev = self.hex_board.board
-        curr = board.board
-
-        if len(prev) != len(curr):
-            # tamaños distintos: actualizar y salir
-            self.hex_board = board.clone()
-            return None
-
-        size = len(curr)
-        for r in range(size):
-            for c in range(size):
-                # detectar cualquier cambio en la posición que ahora pertenece
-                # al adversario; terminar y devolver la primera encontrada
-                if prev[r][c] != curr[r][c] and curr[r][c] == opponent_id:
-                    self.hex_board = board.clone()
-                    return (r, c)
-
-        # si no se detectó nada nuevo, actualizar la copia y devolver None
-        self.hex_board = board.clone()
-        return None
 
     def add_adjacents_to_node(self, r: int, c: int, target: Optional[Node] = None) -> None:
         """
@@ -398,9 +431,10 @@ class HexNodeGraph:
 
         if self.hex_board is not None:
             try:
-                new.hex_board = self.hex_board.clone()
+                # `hex_board` ahora es campo de clase; no clonarlo por instancia
+                pass
             except Exception:
-                new.hex_board = None
+                pass
 
         if not self.matrix:
             return new
@@ -439,7 +473,6 @@ class HexNodeGraph:
 
         new.matrix = new_matrix
         return new
-
 
 def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) -> Optional[int]:
     """
