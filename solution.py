@@ -45,7 +45,7 @@ class SmartPlayer(Player):
             self.update_graphs(board)
             
             # Usar minimax solo en tableros pequenos para controlar coste.
-            _, best_move = minimax(
+            _, best_move = Minimax.minimax(
                 turno=0,
                 profundidad=3,
                 grafo_propio=self.own_graph,
@@ -142,6 +142,24 @@ class HexNodeGraph:
         # si no se detectó nada nuevo, actualizar la copia y devolver None
         HexNodeGraph.hex_board = board.clone()
         return None
+
+    @staticmethod
+    def is_cell_available(r: int, c: int) -> bool:
+        """Comprueba la casilla (r,c) en `HexNodeGraph.hex_board`.
+
+        Devuelve True si existe `hex_board` y la posición contiene 0,
+        en cualquier otro caso devuelve False (fuera de rango o no inicializado).
+        """
+        board = HexNodeGraph.hex_board
+        if board is None:
+            return False
+
+        size = board.size
+
+        if not (0 <= r < size and 0 <= c < size):
+            return False
+
+        return board.board[r][c] == 0
 
     def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
         # Vecinos en un tablero hexagonal (offset coordinates).
@@ -474,113 +492,85 @@ class HexNodeGraph:
         new.matrix = new_matrix
         return new
 
-def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) -> Optional[int]:
-    """
-    Calcula la heurística basada en la distancia entre extremos de dos
-    `HexNodeGraph` distintos.
+class Minimax:
+    """Contiene la heurística y el algoritmo minimax como métodos estáticos."""
 
-    Parámetros:
-    - `self_graph`: el `HexNodeGraph` del propio jugador.
-    - `opponent_graph`: el `HexNodeGraph` del adversario.
+    @staticmethod
+    def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) -> Optional[int]:
+        if self_graph is None or opponent_graph is None:
+            return None
 
-    Devuelve `distance(opponent) - distance(self)` si ambas distancias
-    están definidas; en caso contrario devuelve `None`.
-    """
-    if self_graph is None or opponent_graph is None:
-        return None
+        d_self = self_graph.distance_between_extremes()
+        d_opponent = opponent_graph.distance_between_extremes()
 
-    d_self = self_graph.distance_between_extremes()
-    d_opponent = opponent_graph.distance_between_extremes()
+        if d_self is None or d_opponent is None:
+            return None
 
-    if d_self is None or d_opponent is None:
-        return None
+        return d_opponent - d_self
 
-    return d_opponent - d_self
+    @staticmethod
+    def minimax(
+        turno: int,
+        profundidad: int,
+        grafo_propio: HexNodeGraph,
+        grafo_oponente: HexNodeGraph,
+        alpha: int = -sys.maxsize - 1,
+        beta: int = sys.maxsize,
+        maximizing: bool = True,
+    ) -> Tuple[int, Optional[Tuple[int, int]]]:
+        """Versión estática del minimax. Retorna (valor, mejor_jugada).
 
-def _is_cell_available(
-    grafo_propio: HexNodeGraph,
-    grafo_oponente: HexNodeGraph,
-    r: int,
-    c: int,
-) -> bool:
-    node_self = grafo_propio.matrix[r][c]
-    node_opp = grafo_oponente.matrix[r][c]
-    if node_self is None or node_opp is None:
-        return False
-    return (not node_self.marked) and (not node_opp.marked)
+        Se puede invocar recursivamente como `Minimax.minimax(...)`.
+        """
+        size = grafo_propio.size  # asumo que tienes .size
 
-def minimax(
-    turno: int,
-    profundidad: int,
-    grafo_propio: HexNodeGraph,
-    grafo_oponente: HexNodeGraph,
-    alpha: int = -sys.maxsize - 1,
-    beta: int = sys.maxsize,
-    maximizing: bool = True,          # más claro que turno % 2
-) -> Tuple[int, Optional[Tuple[int, int]]]:
-    """
-    Retorna (valor, mejor_jugada) — la jugada solo es válida en la raíz (turno=0)
-    """
-    size = grafo_propio.size  # asumo que tienes .size
+        if turno >= profundidad:
+            val = Minimax.calculate_heuristic(grafo_propio, grafo_oponente)
+            return val, None
 
-    # 1. Profundidad máxima → hoja
-    if turno >= profundidad:
-        val = calculate_heuristic(grafo_propio, grafo_oponente)
-        return val, None
+        moves = []
+        for r in range(size):
+            for c in range(size):
+                if HexNodeGraph.is_cell_available(r, c):
+                    moves.append((r, c))
 
-    # 2. Obtener movimientos legales (lista para poder ordenar)
-    moves = []
-    for r in range(size):
-        for c in range(size):
-            if _is_cell_available(grafo_propio, grafo_oponente, r, c):
-                moves.append((r, c))
+        if not moves:
+            return Minimax.calculate_heuristic(grafo_propio, grafo_oponente), None
 
-    if not moves:
-        # Tablero lleno sin ganador (raro en HEX, pero por si acaso)
-        return calculate_heuristic(grafo_propio, grafo_oponente), None
+        best_move = None
 
-    # 3. Ordenar movimientos (crucial para α-β)
-    # Ejemplo simple: ordenar por cercanía a bordes o por heurística rápida
-    # moves.sort(key=lambda m: quick_score_move(grafo_propio, grafo_oponente, m[0], m[1]), reverse=maximizing)
+        if maximizing:
+            max_eval = -sys.maxsize - 1
+            for r, c in moves:
+                clonado_p = grafo_propio.clone_and_mark(r, c)
+                clonado_o = grafo_oponente.clone_and_remove(r, c)
 
-    best_move = None
+                if clonado_p.is_any_adjacent_marked(r, c):
+                    clonado_p.add_adjacents_to_node(r, c)
 
-    if maximizing:  # turno propio (MAX)
-        max_eval = -sys.maxsize - 1
-        for r, c in moves:
-            clonado_p = grafo_propio.clone_and_mark(r, c)
-            clonado_o = grafo_oponente.clone_and_remove(r, c)
-           
-            # Si la nueva casilla está adyacente a alguna marcada,
-            # propagar los adyacentes al extremo correspondiente.
-            if clonado_p.is_any_adjacent_marked(r, c):
-                clonado_p.add_adjacents_to_node(r, c)
+                eval, _ = Minimax.minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, False)
+                if eval is not None and eval > max_eval:
+                    max_eval = eval
+                    if turno == 0:
+                        best_move = (r, c)
+                alpha = max(alpha, eval if eval is not None else alpha)
+                if beta <= alpha:
+                    break
+            return max_eval, best_move
 
-            eval, _ = minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, False)
-            if eval > max_eval:
-                max_eval = eval
-                if turno == 0:
-                    best_move = (r, c)
-            alpha = max(alpha, eval)
-            if beta <= alpha:
-                break  # corte α-β
-        return max_eval, best_move
+        else:
+            min_eval = sys.maxsize
+            for r, c in moves:
+                clonado_o = grafo_oponente.clone_and_mark(r, c)
+                clonado_p = grafo_propio.clone_and_remove(r, c)
 
-    else:  # turno oponente (MIN)
-        min_eval = sys.maxsize
-        for r, c in moves:
-            clonado_o = grafo_oponente.clone_and_mark(r, c)
-            clonado_p = grafo_propio.clone_and_remove(r, c)  
-            
-            # Si la nueva casilla está adyacente a alguna marcada,
-            # propagar los adyacentes al extremo correspondiente.
-            if clonado_o.is_any_adjacent_marked(r, c):
-                clonado_o.add_adjacents_to_node(r, c)
-            
-            eval, _ = minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, True)
-            if eval < min_eval:
-                min_eval = eval
-            beta = min(beta, eval)
-            if beta <= alpha:
-                break  # corte
-        return min_eval, None
+                if clonado_o.is_any_adjacent_marked(r, c):
+                    clonado_o.add_adjacents_to_node(r, c)
+
+                eval, _ = Minimax.minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, True)
+                if eval is not None and eval < min_eval:
+                    min_eval = eval
+                beta = min(beta, eval if eval is not None else beta)
+                if beta <= alpha:
+                    break
+            return min_eval, None
