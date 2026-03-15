@@ -18,7 +18,7 @@ def test_remove_node_at_prints_and_clears_matrix(r: int, c: int):
         # shows the final `matrix[r][c] = None` line as requested
         print(f"matrix[{r}][{c}] = {g.matrix[r][c]}")
 
-    return 
+    return buf.getvalue()
 
 
 if __name__ == "__main__":

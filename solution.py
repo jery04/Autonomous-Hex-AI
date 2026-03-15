@@ -234,6 +234,40 @@ class HexNodeGraph:
             if neigh not in target.neighbors:
                 target.neighbors.append(neigh)
 
+    def mark_node_at(self, r: int, c: int) -> None:
+        """
+        Marca el nodo en (r, c) estableciendo su atributo `marked = True`.
+
+        - Lanza `IndexError` si la matriz no existe o las coordenadas están
+          fuera de rango.
+        - Lanza `ValueError` si la posición ya es `None` (nodo eliminado).
+        """
+        if not self.matrix:
+            raise IndexError("matrix is empty")
+        size = len(self.matrix)
+        if not (0 <= r < size and 0 <= c < size):
+            raise IndexError("coordinates out of range")
+
+        node = self.matrix[r][c]
+        if node is None:
+            raise ValueError("node at given coordinates is None")
+
+        node.marked = True
+
+    def clone_and_mark(self, r: int, c: int) -> "HexNodeGraph":
+        """
+        Clona este `HexNodeGraph` usando `clone()` y marca la posición (r, c)
+        en la copia. Devuelve la copia modificada.
+
+        - El método realiza la clonación primero y luego usa
+          `mark_node_at` sobre la nueva instancia para marcar.
+        - Propaga las mismas excepciones que `mark_node_at` si las
+          coordenadas no son válidas o la posición es `None`.
+        """
+        new_graph = self.clone()
+        new_graph.mark_node_at(r, c)
+        return new_graph
+
     def distance_between_extremes(self, stop_on_first: bool = True) -> Optional[int]:
         """
         Retorna la distancia (número de aristas) entre `extreme1` y `extreme2`
@@ -343,7 +377,6 @@ class HexNodeGraph:
 
         new.matrix = new_matrix
         return new
-
 
 def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) -> Optional[int]:
     """
