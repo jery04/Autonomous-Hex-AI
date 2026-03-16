@@ -26,19 +26,17 @@ class SmartPlayer(Player):
             self.opp_graph = HexNodeGraph()
             self.opp_graph.create_node_matrix(board.size, orientation=opponent_id)
             
-            HexNodeGraph.hex_board = board.clone()  # inicializar la copia del tablero en la clase
-
         opp_move = HexNodeGraph.detect_opponent_move(board, self.own_graph.player)
         if opp_move is not None:
             self.opp_graph.mark_node_at(*opp_move)
             self.own_graph.remove_node_at(*opp_move)
 
     def play(self, board: HexBoard) -> tuple:
-        # Sincronizar y actualizar grafos a partir del tablero
 
         best_move = None
         if board.size <= 7:
-            self.update_graphs(board)
+            # Sincronizar y actualizar grafos a partir del tablero
+            self.update_graphs(board) 
             
             # Usar minimax solo en tableros pequenos para controlar coste.
             _, best_move = Minimax.minimax(
@@ -47,9 +45,8 @@ class SmartPlayer(Player):
                 profundidad=3,
                 grafo_propio=self.own_graph,
                 grafo_oponente=self.opp_graph,
-                best_alpha=-(sys.maxsize + 1),
-                best_beta=sys.maxsize,
-                best_casilla=None,
+                alpha=-(sys.maxsize + 1),
+                beta=sys.maxsize,
             )
 
         if best_move is not None:
@@ -113,11 +110,6 @@ class HexNodeGraph:
             return None
 
         opponent_id = 2 if player == 1 else 1
-
-        # Si no hay tablero previo, almacenar y salir (variable de clase)
-        if HexNodeGraph.hex_board is None:
-            HexNodeGraph.hex_board = board.clone()
-            return None
 
         prev = HexNodeGraph.hex_board.board
         curr = board.board
@@ -186,6 +178,11 @@ class HexNodeGraph:
         """
         if orientation not in (1, 2):
             raise ValueError("orientation must be 1 (L-R) or 2 (T-B)")
+
+        # Si no hay tablero previo, almacenar y salir (variable de clase)
+        if HexNodeGraph.hex_board is None:
+            HexNodeGraph.hex_board = HexBoard(size=size)
+            return None
 
         matrix: List[List[Node]] = [[Node(r, c) for c in range(size)] for r in range(size)]
         self.player = orientation
