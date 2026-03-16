@@ -281,11 +281,11 @@ class HexNodeGraph:
         Añade todos los nodos adyacentes del nodo en (r, c) a `target`.
 
         - `target` por defecto es `self.extreme1`.
-                - Evita duplicados en `target.neighbors`.
-                - No modifica la lista de vecinos de los nodos adyacentes (no
-                    se añade `target` a `neigh.neighbors`).
+        - Evita duplicados en `target.neighbors`.
+        - No modifica la lista de vecinos de los nodos adyacentes (no
+        se añade `target` a `neigh.neighbors`).
         - Lanza `IndexError` si la matriz no existe o coordenadas fuera de
-          rango, y `ValueError` si el nodo fuente o el target son `None`.
+        rango, y `ValueError` si el nodo fuente o el target son `None`.
         """
         if not self.matrix:
             raise IndexError("matrix is empty")
@@ -302,13 +302,23 @@ class HexNodeGraph:
         if target is None:
             raise ValueError("target node is None")
 
-        # Añadir cada vecino del source al target sin duplicados (no viceversa)
+        # Añadir cada vecino del source al target sin duplicados y
+        # también asegurar la adición recíproca (target en neigh.neighbors)
         for neigh in list(source.neighbors):
             if neigh is None or neigh is source or neigh is target:
                 continue
 
+            # añadir neigh a target si no existe
             if neigh not in target.neighbors:
                 target.neighbors.append(neigh)
+
+            # asegurar la relación recíproca: añadir target a neigh.neighbors
+            neigh_neighbors = getattr(neigh, "neighbors", None)
+            if neigh_neighbors is None:
+                neigh.neighbors = [target]
+            else:
+                if target not in neigh_neighbors:
+                    neigh_neighbors.append(target)
 
     def mark_node_at(self, r: int, c: int) -> None:
         """
