@@ -261,6 +261,8 @@ class HexGUI:
 		self.refresh_moves_list()
 
 		if self.board.check_connection(self.ai_id):
+			print(f"HEYYYYYYYYYYYYY:", self.board.check_connection(self.ai_id))
+			print(f"HEYYYYYYYYYYYYY:", self.board.board)	
 			self.game_over = True
 			self.status_label.config(text="Perdiste: la IA conecto izquierda-derecha")
 			messagebox.showinfo("Fin de partida", "Perdiste. Jugador 1 conecto sus extremos.")

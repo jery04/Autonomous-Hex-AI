@@ -70,7 +70,7 @@ class HexBoard:
 
 	def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
 		# Vecinos en un tablero hexagonal (offset coordinates).
-		if r % 2 != 0:  # fila par
+		if r % 2 == 0:  # fila par
 			return [
 				(r - 1, c - 1),    # arriba-izquierda   NW
 				(r - 1, c    ),    # arriba-derecha     NE
