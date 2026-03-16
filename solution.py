@@ -48,8 +48,12 @@ class SmartPlayer(Player):
                 alpha=-(sys.maxsize + 1),
                 beta=sys.maxsize,
             )
-
+        print(self.own_graph.distance_between_extremes())
+        print(self.opp_graph.distance_between_extremes())
+        print("------------------------------------------")
         if best_move is not None:
+            self.own_graph.mark_node_at(*best_move)
+            self.opp_graph.remove_node_at(*best_move)
             return best_move
         
         # Algo raro
@@ -440,21 +444,23 @@ class Minimax:
         Versión estática del minimax. Retorna (valor, mejor_jugada).
         """
 
-        if turno >= profundidad:
+        if turno >= profundidad-1:
             val = Minimax.calculate_heuristic(grafo_propio, grafo_oponente)
             return val, None
 
         moves = []
         for r in range(size):
             for c in range(size):
-                own_node = grafo_propio.matrix[r][c] if grafo_propio.matrix else None
-                opp_node = grafo_oponente.matrix[r][c] if grafo_oponente.matrix else None
+                if maximizing:
+                    node = grafo_propio.matrix[r][c] if grafo_propio.matrix else None
+                else:
+                    node = grafo_oponente.matrix[r][c] if grafo_oponente.matrix else None
                 # Una casilla es legal en este estado minimax solo si
-                # sigue disponible para ambos grafos.
-                if own_node is not None and opp_node is not None:
+                if node is not None and not node.marked:
                     moves.append((r, c))
-
+        
         if not moves:
+            print("HEY")
             return Minimax.calculate_heuristic(grafo_propio, grafo_oponente), None
 
         best_move = None
@@ -470,6 +476,7 @@ class Minimax:
                     max_eval = eval
                     if turno == 0:
                         best_move = (r, c)
+
                 alpha = max(alpha, eval if eval is not None else alpha)
                 if beta <= alpha:
                     break
