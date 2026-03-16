@@ -31,10 +31,6 @@ class SmartPlayer(Player):
         opp_move = HexNodeGraph.detect_opponent_move(board, self.own_graph.player)
         if opp_move is not None:
             self.opp_graph.mark_node_at(*opp_move)
-
-            if self.opp_graph.is_any_adjacent_marked(*opp_move):
-                self.opp_graph.add_adjacents_to_node(*opp_move)
-            
             self.own_graph.remove_node_at(*opp_move)
 
     def play(self, board: HexBoard) -> tuple:
@@ -47,6 +43,7 @@ class SmartPlayer(Player):
             # Usar minimax solo en tableros pequenos para controlar coste.
             _, best_move = Minimax.minimax(
                 turno=0,
+                size=board.size,
                 profundidad=3,
                 grafo_propio=self.own_graph,
                 grafo_oponente=self.opp_graph,
@@ -62,11 +59,11 @@ class SmartPlayer(Player):
         return (-1, -1)
 
 class Node:
-    def __init__(self, r: int, c: int):
+    def __init__(self, r: int, c: int, marked: bool = False):
         self.r = r
         self.c = c
         self.neighbors: List["Node"] = []  # lista de Nodos adyacentes
-        self.marked = False
+        self.marked = marked
 
     def __repr__(self) -> str:
         return f"Node({self.r},{self.c})"
@@ -203,12 +200,8 @@ class HexNodeGraph:
                         node.neighbors.append(matrix[nr][nc])
 
         # Crear nodos extremos (no pertenecen a la matriz)
-        self.extreme1 = Node(-1, -1)
-        self.extreme2 = Node(-2, -2)
-        self.extreme1.neighbors = []
-        self.extreme2.neighbors = []
-        self.extreme1.marked = True
-        self.extreme2.marked = True
+        self.extreme1 = Node(-1, -1, True)
+        self.extreme2 = Node(-2, -2, True)
 
         if orientation == 1:
             # Conectar extremos a las columnas izquierda y derecha
@@ -276,50 +269,6 @@ class HexNodeGraph:
 
                 print(f" - {n} -> neighbors: {adj}; matrix[{n.r}][{n.c}] = {in_matrix}")
 
-    def add_adjacents_to_node(self, r: int, c: int, target: Optional[Node] = None) -> None:
-        """
-        Añade todos los nodos adyacentes del nodo en (r, c) a `target`.
-
-        - `target` por defecto es `self.extreme1`.
-        - Evita duplicados en `target.neighbors`.
-        - No modifica la lista de vecinos de los nodos adyacentes (no
-        se añade `target` a `neigh.neighbors`).
-        - Lanza `IndexError` si la matriz no existe o coordenadas fuera de
-        rango, y `ValueError` si el nodo fuente o el target son `None`.
-        """
-        if not self.matrix:
-            raise IndexError("matrix is empty")
-        size = len(self.matrix)
-        if not (0 <= r < size and 0 <= c < size):
-            raise IndexError("coordinates out of range")
-
-        source = self.matrix[r][c]
-        if source is None:
-            raise ValueError("source node is None")
-
-        if target is None:
-            target = self.extreme1
-        if target is None:
-            raise ValueError("target node is None")
-
-        # Añadir cada vecino del source al target sin duplicados y
-        # también asegurar la adición recíproca (target en neigh.neighbors)
-        for neigh in list(source.neighbors):
-            if neigh is None or neigh is source or neigh is target:
-                continue
-
-            # añadir neigh a target si no existe
-            if neigh not in target.neighbors:
-                target.neighbors.append(neigh)
-
-            # asegurar la relación recíproca: añadir target a neigh.neighbors
-            neigh_neighbors = getattr(neigh, "neighbors", None)
-            if neigh_neighbors is None:
-                neigh.neighbors = [target]
-            else:
-                if target not in neigh_neighbors:
-                    neigh_neighbors.append(target)
-
     def mark_node_at(self, r: int, c: int) -> None:
         """
         Marca el nodo en (r, c) estableciendo su atributo `marked = True`.
@@ -339,30 +288,6 @@ class HexNodeGraph:
             raise ValueError("node at given coordinates is None")
 
         node.marked = True
-
-    def is_any_adjacent_marked(self, r: int, c: int) -> bool:
-        """
-        Devuelve True si alguno de los nodos adyacentes al nodo en (r, c)
-        tiene `marked == True`. Levanta `IndexError` si la matriz no existe o
-        las coordenadas están fuera de rango, y `ValueError` si la posición
-        (r,c) es `None` (nodo eliminado).
-        """
-        if not self.matrix:
-            raise IndexError("matrix is empty")
-        size = len(self.matrix)
-        if not (0 <= r < size and 0 <= c < size):
-            raise IndexError("coordinates out of range")
-
-        source = self.matrix[r][c]
-        if source is None:
-            raise ValueError("source node is None")
-
-        for neigh in source.neighbors:
-            if neigh is None:
-                continue
-            if getattr(neigh, "marked", False):
-                return True
-        return False
 
     def clone_and_mark(self, r: int, c: int) -> "HexNodeGraph":
         """
@@ -391,15 +316,17 @@ class HexNodeGraph:
         new_graph.remove_node_at(r, c)
         return new_graph
 
-    def distance_between_extremes(self, stop_on_first: bool = True) -> Optional[int]:
+    def distance_between_extremes(self) -> Optional[int]:
         """
-        Retorna la distancia (número de aristas) entre `extreme1` y `extreme2`
-        usando BFS.
+        Retorna la distancia ponderada entre `extreme1` y `extreme2` usando
+        0-1 BFS:
+
+        - Moverse hacia un nodo con `marked == True` cuesta 0.
+        - Moverse hacia un nodo con `marked == False` cuesta 1.
 
         - If `stop_on_first` is True (default) the search returns immediately
           when `extreme2` is first encountered.
-        - If `stop_on_first` is False the BFS continues and the first-found
-          distance is recorded and returned after the search finishes.
+        - If `stop_on_first` is False the search computes the global minimum.
 
         Devuelve None si no existe camino o si los extremos no están definidos.
         """
@@ -408,36 +335,35 @@ class HexNodeGraph:
 
         from collections import deque
 
-        q = deque()
-        q.append((self.extreme1, 0))
-        visited = set()
-        visited.add((self.extreme1.r, self.extreme1.c))
-
-        found_distance: Optional[int] = None
+        q = deque([self.extreme1])
+        distances = {self.extreme1: 0}
 
         while q:
-            node, dist = q.popleft()
-            if node is self.extreme2:
-                current_dist = dist - 1
-                if stop_on_first:
-                    self.min_distance = current_dist
-                    return current_dist
-                # record and continue exploring
-                if found_distance is None or current_dist < found_distance:
-                    found_distance = current_dist
+            node = q.popleft()
+            current_dist = distances[node]
 
             for neigh in node.neighbors:
                 if neigh is None:
                     continue
-                coord = (neigh.r, neigh.c)
-                if coord in visited:
-                    continue
-                visited.add(coord)
-                q.append((neigh, dist + 1))
 
-        # guardar el resultado encontrado (puede ser None) antes de devolver
-        self.min_distance = found_distance
-        return found_distance
+                step = 0 if getattr(neigh, "marked", False) else 1
+                candidate = current_dist + step
+
+                previous = distances.get(neigh)
+                if previous is None or candidate < previous:
+                    distances[neigh] = candidate
+                    if step == 0:
+                        q.appendleft(neigh)
+                    else:
+                        q.append(neigh)
+
+        if self.extreme2 not in distances:
+            self.min_distance = None
+            return None
+
+        result = max(distances[self.extreme2], 0)
+        self.min_distance = result
+        return result
 
     def clone(self) -> "HexNodeGraph":
         """
@@ -521,6 +447,7 @@ class Minimax:
     @staticmethod
     def minimax(
         turno: int,
+        size: int,
         profundidad: int,
         grafo_propio: HexNodeGraph,
         grafo_oponente: HexNodeGraph,
@@ -528,11 +455,9 @@ class Minimax:
         beta: int = sys.maxsize,
         maximizing: bool = True,
     ) -> Tuple[int, Optional[Tuple[int, int]]]:
-        """Versión estática del minimax. Retorna (valor, mejor_jugada).
-
-        Se puede invocar recursivamente como `Minimax.minimax(...)`.
         """
-        size = grafo_propio.size  # asumo que tienes .size
+        Versión estática del minimax. Retorna (valor, mejor_jugada).
+        """
 
         if turno >= profundidad:
             val = Minimax.calculate_heuristic(grafo_propio, grafo_oponente)
@@ -555,10 +480,7 @@ class Minimax:
                 clonado_p = grafo_propio.clone_and_mark(r, c)
                 clonado_o = grafo_oponente.clone_and_remove(r, c)
 
-                if clonado_p.is_any_adjacent_marked(r, c):
-                    clonado_p.add_adjacents_to_node(r, c)
-
-                eval, _ = Minimax.minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, False)
+                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, False)
                 if eval is not None and eval > max_eval:
                     max_eval = eval
                     if turno == 0:
@@ -574,10 +496,7 @@ class Minimax:
                 clonado_o = grafo_oponente.clone_and_mark(r, c)
                 clonado_p = grafo_propio.clone_and_remove(r, c)
 
-                if clonado_o.is_any_adjacent_marked(r, c):
-                    clonado_o.add_adjacents_to_node(r, c)
-
-                eval, _ = Minimax.minimax(turno + 1, profundidad, clonado_p, clonado_o, alpha, beta, True)
+                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, True)
                 if eval is not None and eval < min_eval:
                     min_eval = eval
                 beta = min(beta, eval if eval is not None else beta)
