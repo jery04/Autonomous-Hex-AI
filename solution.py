@@ -179,10 +179,9 @@ class HexNodeGraph:
         if orientation not in (1, 2):
             raise ValueError("orientation must be 1 (L-R) or 2 (T-B)")
 
-        # Si no hay tablero previo, almacenar y salir (variable de clase)
+        # Si no hay tablero previo, inicializarlo (variable de clase)
         if HexNodeGraph.hex_board is None:
             HexNodeGraph.hex_board = HexBoard(size=size)
-            return None
 
         matrix: List[List[Node]] = [[Node(r, c) for c in range(size)] for r in range(size)]
         self.player = orientation
@@ -222,7 +221,7 @@ class HexNodeGraph:
         self.matrix = matrix
         return matrix
 
-    def remove_node_at(self, r: int, c: int, verbose: bool = True) -> None:
+    def remove_node_at(self, r: int, c: int) -> None:
         """
         Elimina el nodo en (r, c) de la matriz y quita su referencia
         de todos sus adyacentes. Después pone la posición en la matriz a None.
@@ -250,21 +249,6 @@ class HexNodeGraph:
         # Limpiar las conexiones del nodo y eliminar de la matriz
         node.neighbors = []
         self.matrix[r][c] = None
-
-        if verbose:
-            # Mostrar la lista de adyacencia actual de los antiguos vecinos
-            print(f"Removed node at ({r},{c}). Neighbors' adjacency:")
-            for n in neighs:
-                # imprimir la adyacencia tal cual se guarda en el objeto Node
-                adj = getattr(n, "neighbors", None)
-
-                # comprobar qué hay en la posición de la matriz (si aplica)
-                if 0 <= n.r < size and 0 <= n.c < size:
-                    in_matrix = self.matrix[n.r][n.c]
-                else:
-                    in_matrix = "(not in matrix)"
-
-                print(f" - {n} -> neighbors: {adj}; matrix[{n.r}][{n.c}] = {in_matrix}")
 
     def mark_node_at(self, r: int, c: int) -> None:
         """
@@ -463,7 +447,11 @@ class Minimax:
         moves = []
         for r in range(size):
             for c in range(size):
-                if HexNodeGraph.is_cell_available(r, c):
+                own_node = grafo_propio.matrix[r][c] if grafo_propio.matrix else None
+                opp_node = grafo_oponente.matrix[r][c] if grafo_oponente.matrix else None
+                # Una casilla es legal en este estado minimax solo si
+                # sigue disponible para ambos grafos.
+                if own_node is not None and opp_node is not None:
                     moves.append((r, c))
 
         if not moves:
