@@ -47,7 +47,13 @@ class HexGUI:
 		)
 		self.status_label.pack(anchor="w", pady=(0, 10))
 
-		canvas_width = self.margin_x * 2 + self.col_step * (self.size - 1) + 2 * self.hex_radius + 30
+		canvas_width = (
+			self.margin_x * 2
+			+ self.col_step * (self.size - 1)
+			+ 2 * self.hex_radius
+			+ self.col_step // 2
+			+ 30
+		)
 		canvas_height = self.margin_y * 2 + self.row_step * (self.size - 1) + self.hex_radius + 20
 		self.canvas = tk.Canvas(
 			left,
@@ -129,6 +135,23 @@ class HexGUI:
 			return "#10b981"
 		return "#ffffff"
 
+	def _empty_cell_color(self, r: int, c: int) -> str:
+		"""Color de apoyo visual para bordes en esquema even-r horizontal."""
+		if r == 0 and c == 0:
+			return "#f4f3bd"
+		if r == 0:
+			return "#e8eef6"
+		if c == 0:
+			return "#e9efe7"
+		return "#ffffff"
+
+	def _cell_center(self, r: int, c: int) -> tuple[float, float]:
+		# even-r horizontal: filas pares desplazadas medio paso a la derecha.
+		offset_x = (self.col_step / 2) if (r % 2 == 0) else 0.0
+		cx = self.margin_x + c * self.col_step + offset_x
+		cy = self.margin_y + r * self.row_step
+		return cx, cy
+
 	def redraw_board(self) -> None:
 		self.canvas.delete("all")
 		self.cell_centers.clear()
@@ -136,15 +159,15 @@ class HexGUI:
 
 		for r in range(self.size):
 			for c in range(self.size):
-				cx = self.margin_x + c * self.col_step + r * (self.col_step / 2)
-				cy = self.margin_y + r * self.row_step
+				cx, cy = self._cell_center(r, c)
 
 				self.cell_centers[(r, c)] = (cx, cy)
 
 				value = self.board.board[r][c]
+				fill_color = self._cell_color(value) if value != 0 else self._empty_cell_color(r, c)
 				polygon_id = self.canvas.create_polygon(
 					self.hex_points(cx, cy, self.hex_radius),
-					fill=self._cell_color(value),
+					fill=fill_color,
 					outline="#1f2937",
 					width=2,
 					tags=("hex_cell", f"cell_{r}_{c}"),
@@ -157,33 +180,15 @@ class HexGUI:
 				elif value == self.ai_id:
 					symbol = "O"
 
-				if symbol:
-					self.canvas.create_text(
-						cx,
-						cy,
-						text=symbol,
-						font=("Segoe UI", 14, "bold"),
-						fill="#111827",
-					)
-
-		for r in range(self.size):
-			left_cx, left_cy = self.cell_centers[(r, 0)]
-			right_cx, right_cy = self.cell_centers[(r, self.size - 1)]
-
-			self.canvas.create_text(
-				left_cx - self.hex_radius - 24,
-				left_cy,
-				text=str(r),
-				font=("Segoe UI", 11, "bold"),
-				fill="#111827",
-			)
-			self.canvas.create_text(
-				right_cx + self.hex_radius + 24,
-				right_cy,
-				text=str(r),
-				font=("Segoe UI", 11, "bold"),
-				fill="#111827",
-			)
+				label_text = f"{r}, {c}" if not symbol else f"{r}, {c}\n{symbol}"
+				self.canvas.create_text(
+					cx,
+					cy,
+					text=label_text,
+					font=("Segoe UI", 11, "bold"),
+					fill="#111827",
+					tags=("hex_cell", f"cell_{r}_{c}"),
+				)
 
 	def refresh_moves_list(self) -> None:
 		self.moves_list.delete(0, tk.END)
@@ -197,15 +202,18 @@ class HexGUI:
 		if self.game_over:
 			return
 
-		item = self.canvas.find_closest(event.x, event.y)
-		if not item:
+		items = self.canvas.find_overlapping(event.x, event.y, event.x, event.y)
+		if not items:
 			return
 
-		tags = self.canvas.gettags(item[0])
 		cell_tag = None
-		for tag in tags:
-			if tag.startswith("cell_"):
-				cell_tag = tag
+		for item_id in reversed(items):
+			tags = self.canvas.gettags(item_id)
+			for tag in tags:
+				if tag.startswith("cell_"):
+					cell_tag = tag
+					break
+			if cell_tag is not None:
 				break
 
 		if cell_tag is None:
@@ -260,9 +268,7 @@ class HexGUI:
 		self.redraw_board()
 		self.refresh_moves_list()
 
-		if self.board.check_connection(self.ai_id):
-			print(f"HEYYYYYYYYYYYYY:", self.board.check_connection(self.ai_id))
-			print(f"HEYYYYYYYYYYYYY:", self.board.board)	
+		if self.board.check_connection(self.ai_id):	
 			self.game_over = True
 			self.status_label.config(text="Perdiste: la IA conecto izquierda-derecha")
 			messagebox.showinfo("Fin de partida", "Perdiste. Jugador 1 conecto sus extremos.")

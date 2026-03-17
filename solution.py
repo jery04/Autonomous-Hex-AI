@@ -48,9 +48,6 @@ class SmartPlayer(Player):
                 alpha=-(sys.maxsize + 1),
                 beta=sys.maxsize,
             )
-        print(self.own_graph.distance_between_extremes())
-        print(self.opp_graph.distance_between_extremes())
-        print("------------------------------------------")
         if best_move is not None:
             self.own_graph.mark_node_at(*best_move)
             self.opp_graph.remove_node_at(*best_move)
@@ -345,7 +342,8 @@ class HexNodeGraph:
         if self.extreme2 not in distances:
             self.min_distance = None
             return None
-
+        for node in distances:
+            print(f"{node} {distances[node]}")
         result = max(distances[self.extreme2], 0)
         self.min_distance = result
         return result
@@ -423,9 +421,13 @@ class Minimax:
 
         d_self = self_graph.distance_between_extremes()
         d_opponent = opponent_graph.distance_between_extremes()
-
+        
         if d_self is None or d_opponent is None:
             return None
+        
+        if d_opponent == 0:
+            print("HEYYYYYYYYYYYYYYYYYYYYYYYYYYY")
+            return -1000
 
         return d_opponent - d_self
 
@@ -460,7 +462,6 @@ class Minimax:
                     moves.append((r, c))
         
         if not moves:
-            print("HEY")
             return Minimax.calculate_heuristic(grafo_propio, grafo_oponente), None
 
         best_move = None
@@ -468,30 +469,38 @@ class Minimax:
         if maximizing:
             max_eval = -sys.maxsize - 1
             for r, c in moves:
+
                 clonado_p = grafo_propio.clone_and_mark(r, c)
                 clonado_o = grafo_oponente.clone_and_remove(r, c)
 
                 eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, False)
+                #print(f"{eval} ({r},{c})")
                 if eval is not None and eval > max_eval:
                     max_eval = eval
                     if turno == 0:
                         best_move = (r, c)
-
                 alpha = max(alpha, eval if eval is not None else alpha)
                 if beta <= alpha:
                     break
+            
             return max_eval, best_move
 
         else:
             min_eval = sys.maxsize
             for r, c in moves:
+
                 clonado_o = grafo_oponente.clone_and_mark(r, c)
                 clonado_p = grafo_propio.clone_and_remove(r, c)
 
                 eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, True)
+
+                print(f"{eval} ({r},{c})")               
+                
                 if eval is not None and eval < min_eval:
                     min_eval = eval
                 beta = min(beta, eval if eval is not None else beta)
                 if beta <= alpha:
                     break
+            print("")
+
             return min_eval, None
