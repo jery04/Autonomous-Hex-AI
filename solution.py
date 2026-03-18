@@ -322,7 +322,7 @@ class Minimax:
         elif 4 <= size <= 5:
             profundidad = 5
         elif 6 <= size <= 7:
-            profundidad = 3
+            profundidad = 5
 
         _, best_move = Minimax.minimax(
             turno=0,
@@ -335,6 +335,45 @@ class Minimax:
             return best_move
         
         return None
+
+    @staticmethod
+    def get_ordered_moves(graph: HexNodeGraph) -> list[tuple[int, int]]:
+        """
+        Prioriza:
+        1. Casillas adyacentes a fichas ya colocadas (propias o del rival)
+        2. Casillas cercanas al centro
+        """
+        size = graph.size
+        center_r, center_c = size // 2, size // 2
+
+        candidates = []
+        others = []
+
+        for r in range(size):
+            for c in range(size):
+                if not graph.is_cell_available(r, c):
+                    continue
+
+                is_adjacent = False
+                for nr, nc in graph._neighbors(r, c):
+                    if 0 <= nr < size and 0 <= nc < size:
+                        if graph.matrix[nr][nc].marked != 0:
+                            is_adjacent = True
+                            break
+
+                dist_center = abs(r - center_r) + abs(c - center_c)
+
+                if is_adjacent:
+                    candidates.append(((r, c), dist_center))
+                else:
+                    others.append(((r, c), dist_center))
+
+        # Ordenamos cada grupo por cercanía al centro.
+        candidates.sort(key=lambda x: x[1])
+        others.sort(key=lambda x: x[1])
+
+        # Primero todos los que tocan algo, luego el resto.
+        return [m[0] for m in candidates + others]
 
     @staticmethod
     def minimax(
@@ -356,12 +395,7 @@ class Minimax:
             #print(f"{tuple1} {tuple2} {val}")
             return val, None
 
-        moves = []
-        for r in range(graph.size):
-            for c in range(graph.size):
-                # Una casilla es legal en este estado minimax solo si
-                if graph.is_cell_available(r, c):
-                    moves.append((r, c))
+        moves = Minimax.get_ordered_moves(graph)
         
         if not moves:
             return Minimax.calculate_heuristic(graph), None
