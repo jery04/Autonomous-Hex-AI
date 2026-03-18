@@ -17,9 +17,6 @@ class SmartPlayer(Player):
         if self.graph is None:
             self.graph = HexNodeGraph(size=board.size, player_id=self.player_id)
         
-        # Delegate update/opp-detection to the graph itself
-        self.graph.update(board)
-
     def play(self, board: HexBoard) -> tuple:
 
         best_move = None
@@ -27,17 +24,10 @@ class SmartPlayer(Player):
             # Sincronizar y actualizar grafos a partir del tablero
             self.update_graphs(board) 
             
-            # Usar minimax solo en tableros pequenos para controlar coste.
-            _, best_move = Minimax.minimax(
-                turno=0,
-                profundidad=5,
-                graph=self.graph,
-            )
-            #print("")
-            
-        if best_move is not None:
-            self.graph.mark_node_at(*best_move, self.player_id)
-            return best_move
+            # Usar preminimax para elegir profundidad según tamaño
+            return Minimax.preminimax(self.graph, board)
+        else:
+            print("Soon...")
         
         # Algo raro
         return (-1, -1)
@@ -72,7 +62,7 @@ class HexNodeGraph:
         self.hex_board: Optional[HexBoard] = None
         self.create_node_matrix()
 
-    def detect_opponent_move(self, board: HexBoard) -> Optional[Tuple[int, int]]:
+    def detect_opponent_move(self, board: HexBoard) -> None:
         """
         Recibe un `HexBoard`, guarda una copia en `hex_board` y devuelve
         la coordenada (row, col) de una nueva ficha puesta por el adversario
@@ -97,25 +87,10 @@ class HexNodeGraph:
                 # detectar cualquier cambio en la posición que ahora pertenece
                 # al adversario; terminar y devolver la primera encontrada
                 if prev[r][c] != curr[r][c] and curr[r][c] == self.opp:
-                    self.hex_board = board.clone()
-                    return (r, c)
+                    self.mark_node_at(r, c, self.opp)
+                    return None
 
-        # si no se detectó nada nuevo, actualizar la copia y devolver None
-        self.hex_board = board.clone()
         return None
-
-    def update(self, board: HexBoard) -> None:
-        """
-        Sincroniza la copia interna del tablero y marca en la gráfica
-        la última jugada detectada del oponente (si existe).
-
-        - Llama a `detect_opponent_move` para actualizar `self.hex_board`.
-        - Si `detect_opponent_move` devuelve una coordenada, marca el
-            nodo correspondiente con `self.opp`.
-        """
-        opp_move = self.detect_opponent_move(board)
-        if opp_move is not None:
-            self.mark_node_at(*opp_move, self.opp)
 
     def is_cell_available(self, r: int, c: int) -> bool:
         """Comprueba la casilla (r,c) en `HexNodeGraph.hex_board`.
@@ -230,12 +205,14 @@ class HexNodeGraph:
 
         if player_id is None:
             node.marked = 0
+            self.hex_board.board[r][c] = 0
             return
 
         if player_id not in (1, 2):
             raise ValueError("player_id must be 1 or 2")
 
         node.marked = player_id
+        self.hex_board.board[r][c] = player_id
 
     def distance_between_extremes(self, player_id: int) -> Optional[int]:
         """
@@ -321,6 +298,43 @@ class Minimax:
             return 1000
 
         return d_opponent - d_self
+
+    @staticmethod
+    def preminimax(graph: "HexNodeGraph", board: HexBoard) -> Optional[Tuple[int, int]]:
+        """
+        Selecciona una profundidad adecuada en función del tamaño del grafo
+        y llama a `minimax`. Retorna el (valor, mejor_jugada).
+
+        Reglas de profundidad:
+        - size <= 3  -> profundidad 11
+        - 4 <= size <=5 -> profundidad 5
+        - 6 <= size <=7 -> profundidad 3
+        - por defecto -> profundidad 3
+        """
+        
+        # Sincronizar grafos con el tablero actual
+        graph.detect_opponent_move(board)  
+
+        size = getattr(graph, "size", None)
+        
+        if size <= 3:
+            profundidad = 11
+        elif 4 <= size <= 5:
+            profundidad = 5
+        elif 6 <= size <= 7:
+            profundidad = 3
+
+        _, best_move = Minimax.minimax(
+            turno=0,
+            profundidad=profundidad,
+            graph=graph,
+        )
+        
+        if best_move is not None:
+            graph.mark_node_at(*best_move, graph.player)
+            return best_move
+        
+        return None
 
     @staticmethod
     def minimax(

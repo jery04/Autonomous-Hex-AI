@@ -4,6 +4,7 @@ from math import cos, radians, sin, sqrt
 
 from board import HexBoard
 from solution import SmartPlayer
+import time
 
 
 class HexGUI:
@@ -16,6 +17,8 @@ class HexGUI:
 
 		self.human_moves: list[tuple[int, int]] = []
 		self.ai_moves: list[tuple[int, int]] = []
+		# tiempos de ejecución de self.smart_player.play en segundos
+		self.play_times: list[float] = []
 		self.game_over = False
 
 		self.hex_radius = 28
@@ -103,6 +106,15 @@ class HexGUI:
 			command=self.reset_game,
 		)
 		restart_btn.pack(anchor="w", pady=(12, 0))
+
+		self.timing_label = tk.Label(
+			right,
+			text="Tiempos IA — promedio: N/A, máximo: N/A",
+			font=("Segoe UI", 10),
+			bg="#ffffff",
+			fg="#111827",
+		)
+		self.timing_label.pack(anchor="w", pady=(12, 0))
 
 		self.cell_centers: dict[tuple[int, int], tuple[float, float]] = {}
 		self.cell_polygons: dict[tuple[int, int], int] = {}
@@ -243,6 +255,7 @@ class HexGUI:
 			self.game_over = True
 			self.status_label.config(text="Ganaste: conectaste arriba-abajo")
 			messagebox.showinfo("Fin de partida", "Ganaste. Jugador 2 conecto sus extremos.")
+			self.show_timing_summary()
 			return
 
 		self.status_label.config(text="Turno del algoritmo...")
@@ -252,8 +265,11 @@ class HexGUI:
 	def play_ai_turn(self) -> None:
 		if self.game_over:
 			return
-        
-		ai_r, ai_c = self.smart_player.play(self.board.clone())
+		# medir tiempo de ejecución de smart_player.play
+		start = time.perf_counter()
+		ai_r, ai_c = self.smart_player.play(self.board)
+		duration = time.perf_counter() - start
+		self.play_times.append(duration)
 		placed = self.board.place_piece(ai_r, ai_c, self.ai_id)
 		if not placed:
 			self.game_over = True
@@ -262,6 +278,7 @@ class HexGUI:
 				"Error de IA",
 				f"El algoritmo intento jugar en una casilla invalida: ({ai_r}, {ai_c}).",
 			)
+			self.show_timing_summary()
 			return
 
 		self.ai_moves.append((ai_r, ai_c))
@@ -272,6 +289,7 @@ class HexGUI:
 			self.game_over = True
 			self.status_label.config(text="Perdiste: la IA conecto izquierda-derecha")
 			messagebox.showinfo("Fin de partida", "Perdiste. Jugador 1 conecto sus extremos.")
+			self.show_timing_summary()
 			return
 
 		self.status_label.config(text="Tu turno: haz click en una casilla vacia")
@@ -281,11 +299,24 @@ class HexGUI:
 		self.smart_player = SmartPlayer(player_id=1)
 		self.human_moves.clear()
 		self.ai_moves.clear()
+		self.play_times.clear()
 		self.game_over = False
 		self.status_label.config(text="Tu turno: haz click en una casilla vacia")
 		self.redraw_board()
 		self.refresh_moves_list()
 		self.smart_player = SmartPlayer(player_id=1)
+
+	def show_timing_summary(self) -> None:
+		if not self.play_times:
+			avg = 0.0
+			max_t = 0.0
+		else:
+			avg = sum(self.play_times) / len(self.play_times)
+			max_t = max(self.play_times)
+		# imprimir en consola
+		print(f"IA play() promedio: {avg:.6f}s, máximo: {max_t:.6f}s")
+		# actualizar label visual
+		self.timing_label.config(text=f"Promedio: {avg:.4f}s   Máximo: {max_t:.4f}s")
 
 	def run(self) -> None:
 		self.root.mainloop()
