@@ -42,12 +42,14 @@ class SmartPlayer(Player):
             _, best_move = Minimax.minimax(
                 turno=0,
                 size=board.size,
-                profundidad=3,
+                profundidad=5,
                 grafo_propio=self.own_graph,
                 grafo_oponente=self.opp_graph,
                 alpha=-(sys.maxsize + 1),
                 beta=sys.maxsize,
             )
+            print("")
+            
         if best_move is not None:
             self.own_graph.mark_node_at(*best_move)
             self.opp_graph.remove_node_at(*best_move)
@@ -342,8 +344,10 @@ class HexNodeGraph:
         if self.extreme2 not in distances:
             self.min_distance = None
             return None
-        for node in distances:
-            print(f"{node} {distances[node]}")
+        
+        #for node in distances:
+        #    print(f"{node} {distances[node]}")
+            
         result = max(distances[self.extreme2], 0)
         self.min_distance = result
         return result
@@ -422,12 +426,13 @@ class Minimax:
         d_self = self_graph.distance_between_extremes()
         d_opponent = opponent_graph.distance_between_extremes()
         
-        if d_self is None or d_opponent is None:
-            return None
-        
-        if d_opponent == 0:
-            print("HEYYYYYYYYYYYYYYYYYYYYYYYYYYY")
+        if d_self is None:
+            #print("HEYYYYYYYYYYYYYYYYYYYYYYYYYYY")
             return -1000
+        
+        if d_opponent is None:
+            #print("Siuuuuuuuuuuuuuuuuuuuuuuuuuuu")
+            return 1000
 
         return d_opponent - d_self
 
@@ -441,6 +446,8 @@ class Minimax:
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,
+        tuple1 = None,
+        tuple2 = None,
     ) -> Tuple[int, Optional[Tuple[int, int]]]:
         """
         Versión estática del minimax. Retorna (valor, mejor_jugada).
@@ -448,6 +455,7 @@ class Minimax:
 
         if turno >= profundidad-1:
             val = Minimax.calculate_heuristic(grafo_propio, grafo_oponente)
+            #print(f"{tuple1} {tuple2} {val}")
             return val, None
 
         moves = []
@@ -473,7 +481,7 @@ class Minimax:
                 clonado_p = grafo_propio.clone_and_mark(r, c)
                 clonado_o = grafo_oponente.clone_and_remove(r, c)
 
-                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, False)
+                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, False, (r,c))
                 #print(f"{eval} ({r},{c})")
                 if eval is not None and eval > max_eval:
                     max_eval = eval
@@ -492,15 +500,15 @@ class Minimax:
                 clonado_o = grafo_oponente.clone_and_mark(r, c)
                 clonado_p = grafo_propio.clone_and_remove(r, c)
 
-                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, True)
+                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, True, tuple1, (r,c))
 
-                print(f"{eval} ({r},{c})")               
+                #print(f"{eval} ({r},{c})")               
                 
                 if eval is not None and eval < min_eval:
                     min_eval = eval
                 beta = min(beta, eval if eval is not None else beta)
                 if beta <= alpha:
                     break
-            print("")
+            #print("")
 
             return min_eval, None
