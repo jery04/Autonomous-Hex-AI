@@ -285,6 +285,7 @@ class HexGUI:
 		self.status_label.config(text="Tu turno: haz click en una casilla vacia")
 		self.redraw_board()
 		self.refresh_moves_list()
+		self.smart_player = SmartPlayer(player_id=1)
 
 	def run(self) -> None:
 		self.root.mainloop()

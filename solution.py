@@ -7,29 +7,18 @@ import sys
 class SmartPlayer(Player):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.own_graph = None
-        self.opp_graph = None
+        self.graph: Optional[HexNodeGraph] = None
 
     def update_graphs(self, board: HexBoard) -> None:
-        """Ensure graphs exist and sync them with the provided `board`.
-
-        Crea los grafos si no existen, inicializa la copia del tablero en
-        `HexNodeGraph.hex_board` y detecta la última jugada del oponente
-        actualizando ambos grafos según corresponda.
+        """
+        Crea lel grarfo si no existe y detecta la última jugada del oponente
         """
         # Reuse existing graphs if present; create them if not.
-        if self.own_graph is None or self.opp_graph is None:
-            self.own_graph = HexNodeGraph()
-            self.own_graph.create_node_matrix(board.size, orientation=self.player_id)
-            
-            opponent_id = 2 if self.player_id == 1 else 1
-            self.opp_graph = HexNodeGraph()
-            self.opp_graph.create_node_matrix(board.size, orientation=opponent_id)
-            
-        opp_move = HexNodeGraph.detect_opponent_move(board, self.own_graph.player)
-        if opp_move is not None:
-            self.opp_graph.mark_node_at(*opp_move)
-            self.own_graph.remove_node_at(*opp_move)
+        if self.graph is None:
+            self.graph = HexNodeGraph(size=board.size, player_id=self.player_id)
+        
+        # Delegate update/opp-detection to the graph itself
+        self.graph.update(board)
 
     def play(self, board: HexBoard) -> tuple:
 
@@ -41,25 +30,20 @@ class SmartPlayer(Player):
             # Usar minimax solo en tableros pequenos para controlar coste.
             _, best_move = Minimax.minimax(
                 turno=0,
-                size=board.size,
                 profundidad=5,
-                grafo_propio=self.own_graph,
-                grafo_oponente=self.opp_graph,
-                alpha=-(sys.maxsize + 1),
-                beta=sys.maxsize,
+                graph=self.graph,
             )
-            print("")
+            #print("")
             
         if best_move is not None:
-            self.own_graph.mark_node_at(*best_move)
-            self.opp_graph.remove_node_at(*best_move)
+            self.graph.mark_node_at(*best_move, self.player_id)
             return best_move
         
         # Algo raro
         return (-1, -1)
 
 class Node:
-    def __init__(self, r: int, c: int, marked: bool = False):
+    def __init__(self, r: int, c: int, marked: int = 0):
         self.r = r
         self.c = c
         self.neighbors: List["Node"] = []  # lista de Nodos adyacentes
@@ -67,17 +51,6 @@ class Node:
 
     def __repr__(self) -> str:
         return f"Node({self.r},{self.c})"
-
-    def clone(self) -> "Node":
-        """Devuelve una copia superficial del nodo (sin vecinos).
-
-        La lista `neighbors` queda vacía: las referencias se reconstruyen
-        posteriormente al clonar el grafo completo.
-        """
-        n = Node(self.r, self.c)
-        n.marked = getattr(self, "marked", False)
-        n.neighbors = []
-        return n
 
 class HexNodeGraph:
     """
@@ -87,18 +60,19 @@ class HexNodeGraph:
     Los nodos extremos se exponen en `extreme1` y `extreme2`.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, size: int, player_id: int) -> None:
+        self.size = size
+        self.player = player_id
         self.matrix: List[List[Node]] = []
-        self.extreme1: Optional[Node] = None
-        self.extreme2: Optional[Node] = None
-        self.player: Optional[int] = None
-        self.min_distance: Optional[int] = None
+        self.node_left: Optional[Node] = None
+        self.node_right: Optional[Node] = None
+        self.node_up: Optional[Node] = None
+        self.node_bottom: Optional[Node] = None
+        self.opp: Optional[int] = None
+        self.hex_board: Optional[HexBoard] = None
+        self.create_node_matrix()
 
-    # Campo estático compartido por todas las instancias
-    hex_board: Optional[HexBoard] = None
-
-    @staticmethod
-    def detect_opponent_move(board: HexBoard, player: Optional[int]) -> Optional[Tuple[int, int]]:
+    def detect_opponent_move(self, board: HexBoard) -> Optional[Tuple[int, int]]:
         """
         Recibe un `HexBoard`, guarda una copia en `hex_board` y devuelve
         la coordenada (row, col) de una nueva ficha puesta por el adversario
@@ -109,17 +83,12 @@ class HexNodeGraph:
         - Si detecta múltiples cambios devuelve la primera encontrada.
         """
         
-        if player not in (1, 2):
-            return None
-
-        opponent_id = 2 if player == 1 else 1
-
-        prev = HexNodeGraph.hex_board.board
+        prev = self.hex_board.board if self.hex_board else None
         curr = board.board
 
         if len(prev) != len(curr):
             # tamaños distintos: actualizar y salir
-            HexNodeGraph.hex_board = board.clone()
+            self.hex_board = board.clone()
             return None
 
         size = len(curr)
@@ -127,22 +96,34 @@ class HexNodeGraph:
             for c in range(size):
                 # detectar cualquier cambio en la posición que ahora pertenece
                 # al adversario; terminar y devolver la primera encontrada
-                if prev[r][c] != curr[r][c] and curr[r][c] == opponent_id:
-                    HexNodeGraph.hex_board = board.clone()
+                if prev[r][c] != curr[r][c] and curr[r][c] == self.opp:
+                    self.hex_board = board.clone()
                     return (r, c)
 
         # si no se detectó nada nuevo, actualizar la copia y devolver None
-        HexNodeGraph.hex_board = board.clone()
+        self.hex_board = board.clone()
         return None
 
-    @staticmethod
-    def is_cell_available(r: int, c: int) -> bool:
+    def update(self, board: HexBoard) -> None:
+        """
+        Sincroniza la copia interna del tablero y marca en la gráfica
+        la última jugada detectada del oponente (si existe).
+
+        - Llama a `detect_opponent_move` para actualizar `self.hex_board`.
+        - Si `detect_opponent_move` devuelve una coordenada, marca el
+            nodo correspondiente con `self.opp`.
+        """
+        opp_move = self.detect_opponent_move(board)
+        if opp_move is not None:
+            self.mark_node_at(*opp_move, self.opp)
+
+    def is_cell_available(self, r: int, c: int) -> bool:
         """Comprueba la casilla (r,c) en `HexNodeGraph.hex_board`.
 
         Devuelve True si existe `hex_board` y la posición contiene 0,
         en cualquier otro caso devuelve False (fuera de rango o no inicializado).
         """
-        board = HexNodeGraph.hex_board
+        board = self.hex_board
         if board is None:
             return False
 
@@ -151,7 +132,7 @@ class HexNodeGraph:
         if not (0 <= r < size and 0 <= c < size):
             return False
 
-        return board.board[r][c] == 0
+        return self.matrix[r][c].marked == 0
 
     def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
         # Vecinos en un tablero hexagonal (offset coordinates).
@@ -174,89 +155,65 @@ class HexNodeGraph:
                 (r    , c - 1),    # izquierda          W
             ]
 
-    def create_node_matrix(self, size: int, orientation: int = 1) -> List[List[Node]]:
-        """Crea la matriz NxN y conecta los nodos extremos.
-
+    def create_node_matrix(self) -> List[List[Node]]:
+        """
+        Crea la matriz NxN y conecta los nodos extremos.
         `orientation` debe ser 1 (izquierda-derecha) o 2 (arriba-abajo).
         """
-        if orientation not in (1, 2):
+        if self.player not in (1, 2):
             raise ValueError("orientation must be 1 (L-R) or 2 (T-B)")
 
         # Si no hay tablero previo, inicializarlo (variable de clase)
-        if HexNodeGraph.hex_board is None:
-            HexNodeGraph.hex_board = HexBoard(size=size)
+        if self.hex_board is None:
+            self.hex_board = HexBoard(size= self.size)
 
-        matrix: List[List[Node]] = [[Node(r, c) for c in range(size)] for r in range(size)]
-        self.player = orientation
+        matrix: List[List[Node]] = [[Node(r, c) for c in range(self.size)] for r in range(self.size)]
+        # Guardar el id del jugador, pero no usarlo para decidir qué extremos
+        # conectar: creamos los cuatro nodos extremos y los enlazamos todos.
+        self.opp = 2 if self.player == 1 else 1
 
-        for r in range(size):
-            for c in range(size):
+        for r in range(self.size):
+            for c in range(self.size):
                 neigh_coords = self._neighbors(r, c)
                 node = matrix[r][c]
                 node.neighbors = []
                 for (nr, nc) in neigh_coords:
-                    if 0 <= nr < size and 0 <= nc < size:
+                    if 0 <= nr < self.size and 0 <= nc < self.size:
                         node.neighbors.append(matrix[nr][nc])
 
         # Crear nodos extremos (no pertenecen a la matriz)
-        self.extreme1 = Node(-1, -1, True)
-        self.extreme2 = Node(-2, -2, True)
+        self.node_left = Node(-1, -1, 1)
+        self.node_right = Node(-2, -2, 1)
+        self.node_up = Node(-3, -3, 2)
+        self.node_bottom = Node(-4, -4, 2)
 
-        if orientation == 1:
-            # Conectar extremos a las columnas izquierda y derecha
-            for r in range(size):
-                left = matrix[r][0]
-                right = matrix[r][size - 1]
-                left.neighbors.append(self.extreme1)
-                self.extreme1.neighbors.append(left)
-                right.neighbors.append(self.extreme2)
-                self.extreme2.neighbors.append(right)
-        else:
-            # Conectar extremos a las filas superior e inferior
-            for c in range(size):
-                top = matrix[0][c]
-                bottom = matrix[size - 1][c]
-                top.neighbors.append(self.extreme1)
-                self.extreme1.neighbors.append(top)
-                bottom.neighbors.append(self.extreme2)
-                self.extreme2.neighbors.append(bottom)
+        # Conectar extremos izquierda/derecha a las columnas
+        for r in range(self.size):
+            left = matrix[r][0]
+            right = matrix[r][self.size - 1]
+            left.neighbors.append(self.node_left)
+            self.node_left.neighbors.append(left)
+            right.neighbors.append(self.node_right)
+            self.node_right.neighbors.append(right)
+
+        # Conectar extremos arriba/abajo a las filas
+        for c in range(self.size):
+            top = matrix[0][c]
+            bottom = matrix[self.size - 1][c]
+            top.neighbors.append(self.node_up)
+            self.node_up.neighbors.append(top)
+            bottom.neighbors.append(self.node_bottom)
+            self.node_bottom.neighbors.append(bottom)
 
         self.matrix = matrix
         return matrix
 
-    def remove_node_at(self, r: int, c: int) -> None:
+    def mark_node_at(self, r: int, c: int, player_id: Optional[int] = None) -> None:
         """
-        Elimina el nodo en (r, c) de la matriz y quita su referencia
-        de todos sus adyacentes. Después pone la posición en la matriz a None.
-        Si la posición ya es None no hace nada. Lanza IndexError si las
-        coordenadas están fuera de rango o la matriz no existe.
-        """
-        if not self.matrix:
-            raise IndexError("matrix is empty")
-        size = len(self.matrix)
-        if not (0 <= r < size and 0 <= c < size):
-            raise IndexError("coordinates out of range")
+        Marca o desmarca el nodo en (r, c).
 
-        node = self.matrix[r][c]
-        if node is None:
-            return
-
-        # Remover la referencia del nodo en cada vecino
-        neighs = list(node.neighbors)
-        for neigh in neighs:
-            try:
-                neigh.neighbors.remove(node)
-            except ValueError:
-                pass
-
-        # Limpiar las conexiones del nodo y eliminar de la matriz
-        node.neighbors = []
-        self.matrix[r][c] = None
-
-    def mark_node_at(self, r: int, c: int) -> None:
-        """
-        Marca el nodo en (r, c) estableciendo su atributo `marked = True`.
-
+        - Si `player_id` es 1 o 2, guarda `player_id` en `marked`.
+        - Si `player_id` es `None`, guarda 0 en `marked` (desmarca).
         - Lanza `IndexError` si la matriz no existe o las coordenadas están
           fuera de rango.
         - Lanza `ValueError` si la posición ya es `None` (nodo eliminado).
@@ -271,56 +228,45 @@ class HexNodeGraph:
         if node is None:
             raise ValueError("node at given coordinates is None")
 
-        node.marked = True
+        if player_id is None:
+            node.marked = 0
+            return
 
-    def clone_and_mark(self, r: int, c: int) -> "HexNodeGraph":
+        if player_id not in (1, 2):
+            raise ValueError("player_id must be 1 or 2")
+
+        node.marked = player_id
+
+    def distance_between_extremes(self, player_id: int) -> Optional[int]:
         """
-        Clona este `HexNodeGraph` usando `clone()` y marca la posición (r, c)
-        en la copia. Devuelve la copia modificada.
+        Retorna la distancia ponderada entre extremos usando 0-1 BFS.
 
-        - El método realiza la clonación primero y luego usa
-          `mark_node_at` sobre la nueva instancia para marcar.
-        - Propaga las mismas excepciones que `mark_node_at` si las
-          coordenadas no son válidas o la posición es `None`.
-        """
-        new_graph = self.clone()
-        new_graph.mark_node_at(r, c)
-        return new_graph
+        Si `player_id == 1` calcula entre `node_left` y `node_right`.
+        Si `player_id == 2` calcula entre `node_up` y `node_bottom`.
 
-    def clone_and_remove(self, r: int, c: int) -> "HexNodeGraph":
-        """
-        Clona este `HexNodeGraph` y elimina la posición (r, c) en la copia.
-
-        - Realiza `clone()` y después llama a `remove_node_at(r, c)` sobre la
-            copia para no modificar el grafo original.
-        - Propaga las mismas excepciones que `remove_node_at` si las
-            coordenadas no son válidas o la posición ya es `None`.
-        """
-        new_graph = self.clone()
-        new_graph.remove_node_at(r, c)
-        return new_graph
-
-    def distance_between_extremes(self) -> Optional[int]:
-        """
-        Retorna la distancia ponderada entre `extreme1` y `extreme2` usando
-        0-1 BFS:
-
-        - Moverse hacia un nodo con `marked == True` cuesta 0.
-        - Moverse hacia un nodo con `marked == False` cuesta 1.
-
-        - If `stop_on_first` is True (default) the search returns immediately
-          when `extreme2` is first encountered.
-        - If `stop_on_first` is False the search computes the global minimum.
+        Reglas de transición:
+        - Solo se puede transitar por nodos con `marked` en {0, player_id}.
+        - Pasar por un nodo con `marked == player_id` cuesta 0.
+        - Pasar por un nodo con `marked == 0` cuesta 1.
 
         Devuelve None si no existe camino o si los extremos no están definidos.
         """
-        if self.extreme1 is None or self.extreme2 is None:
+        if player_id == 1:
+            a = self.node_left
+            b = self.node_right
+        elif player_id == 2:
+            a = self.node_up
+            b = self.node_bottom
+        else:
+            return None
+
+        if a is None or b is None:
             return None
 
         from collections import deque
 
-        q = deque([self.extreme1])
-        distances = {self.extreme1: 0}
+        q = deque([a])
+        distances = {a: 0}
 
         while q:
             node = q.popleft()
@@ -330,7 +276,11 @@ class HexNodeGraph:
                 if neigh is None:
                     continue
 
-                step = 0 if getattr(neigh, "marked", False) else 1
+                neigh_mark = getattr(neigh, "marked", 0)
+                if neigh_mark not in (0, player_id):
+                    continue
+
+                step = 0 if neigh_mark == player_id else 1
                 candidate = current_dist + step
 
                 previous = distances.get(neigh)
@@ -341,97 +291,33 @@ class HexNodeGraph:
                     else:
                         q.append(neigh)
 
-        if self.extreme2 not in distances:
-            self.min_distance = None
+        if b not in distances:
             return None
         
         #for node in distances:
         #    print(f"{node} {distances[node]}")
             
-        result = max(distances[self.extreme2], 0)
-        self.min_distance = result
+        result = max(distances[b], 0)
         return result
-
-    def clone(self) -> "HexNodeGraph":
-        """
-        Devuelve una copia profunda de este `HexNodeGraph`.
-
-        - Se copian todos los `Node` existentes en `matrix` (las posiciones
-          que sean `None` se mantienen como `None`).
-        - Se copian las referencias de vecinos apuntando a los nuevos nodos
-          correspondientes (no se comparten objetos con el original).
-        - Se clonan `extreme1` y `extreme2` si existen y se mantienen las
-          conexiones adecuadas.
-        - Se copia `player`, `min_distance` y se clona `hex_board` si está
-          presente (usando su método `clone`).
-        """
-        new = HexNodeGraph()
-
-        new.player = self.player
-        new.min_distance = self.min_distance
-
-        if self.hex_board is not None:
-            try:
-                # `hex_board` ahora es campo de clase; no clonarlo por instancia
-                pass
-            except Exception:
-                pass
-
-        if not self.matrix:
-            return new
-
-        size = len(self.matrix)
-        new_matrix: List[List[Optional[Node]]] = [[None for _ in range(size)] for _ in range(size)]
-        mapping: dict = {}
-
-        # crear nodos clonados para cada posición (o None)
-        for r in range(size):
-            for c in range(size):
-                old = self.matrix[r][c]
-                if old is None:
-                    new_matrix[r][c] = None
-                else:
-                    cloned = old.clone()
-                    new_matrix[r][c] = cloned
-                    mapping[old] = cloned
-
-        # clonar extremos si existen
-        if self.extreme1 is not None:
-            mapping[self.extreme1] = self.extreme1.clone()
-            new.extreme1 = mapping[self.extreme1]
-        if self.extreme2 is not None:
-            mapping[self.extreme2] = self.extreme2.clone()
-            new.extreme2 = mapping[self.extreme2]
-
-        # reconstruir referencias de vecinos usando el mapping
-        for old_node, new_node in mapping.items():
-            for old_neigh in getattr(old_node, "neighbors", []):
-                if old_neigh is None:
-                    continue
-                target = mapping.get(old_neigh)
-                if target is not None:
-                    new_node.neighbors.append(target)
-
-        new.matrix = new_matrix
-        return new
 
 class Minimax:
     """Contiene la heurística y el algoritmo minimax como métodos estáticos."""
 
     @staticmethod
-    def calculate_heuristic(self_graph: HexNodeGraph, opponent_graph: HexNodeGraph) -> Optional[int]:
-        if self_graph is None or opponent_graph is None:
+    def calculate_heuristic(graph: HexNodeGraph) -> Optional[int]:
+        if graph is None:
             return None
 
-        d_self = self_graph.distance_between_extremes()
-        d_opponent = opponent_graph.distance_between_extremes()
+        if graph.player not in (1, 2) or graph.opp not in (1, 2):
+            return None
+
+        d_self = graph.distance_between_extremes(graph.player)
+        d_opponent = graph.distance_between_extremes(graph.opp)
         
         if d_self is None:
-            #print("HEYYYYYYYYYYYYYYYYYYYYYYYYYYY")
             return -1000
         
         if d_opponent is None:
-            #print("Siuuuuuuuuuuuuuuuuuuuuuuuuuuu")
             return 1000
 
         return d_opponent - d_self
@@ -439,10 +325,8 @@ class Minimax:
     @staticmethod
     def minimax(
         turno: int,
-        size: int,
         profundidad: int,
-        grafo_propio: HexNodeGraph,
-        grafo_oponente: HexNodeGraph,
+        graph: HexNodeGraph,
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,
@@ -454,34 +338,33 @@ class Minimax:
         """
 
         if turno >= profundidad-1:
-            val = Minimax.calculate_heuristic(grafo_propio, grafo_oponente)
+            val = Minimax.calculate_heuristic(graph)
             #print(f"{tuple1} {tuple2} {val}")
             return val, None
 
         moves = []
-        for r in range(size):
-            for c in range(size):
-                if maximizing:
-                    node = grafo_propio.matrix[r][c] if grafo_propio.matrix else None
-                else:
-                    node = grafo_oponente.matrix[r][c] if grafo_oponente.matrix else None
+        for r in range(graph.size):
+            for c in range(graph.size):
                 # Una casilla es legal en este estado minimax solo si
-                if node is not None and not node.marked:
+                if graph.is_cell_available(r, c):
                     moves.append((r, c))
         
         if not moves:
-            return Minimax.calculate_heuristic(grafo_propio, grafo_oponente), None
+            return Minimax.calculate_heuristic(graph), None
 
         best_move = None
 
         if maximizing:
             max_eval = -sys.maxsize - 1
             for r, c in moves:
+                # Marcar la jugada
+                graph.mark_node_at(r, c, graph.player)
 
-                clonado_p = grafo_propio.clone_and_mark(r, c)
-                clonado_o = grafo_oponente.clone_and_remove(r, c)
-
-                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, False, (r,c))
+                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, False, (r,c))
+                
+                # Desmarcar después de evaluar
+                graph.mark_node_at(r, c, None)  
+                
                 #print(f"{eval} ({r},{c})")
                 if eval is not None and eval > max_eval:
                     max_eval = eval
@@ -497,10 +380,13 @@ class Minimax:
             min_eval = sys.maxsize
             for r, c in moves:
 
-                clonado_o = grafo_oponente.clone_and_mark(r, c)
-                clonado_p = grafo_propio.clone_and_remove(r, c)
+                # Marcar la jugada
+                graph.mark_node_at(r, c, graph.opp)
 
-                eval, _ = Minimax.minimax(turno + 1, size, profundidad, clonado_p, clonado_o, alpha, beta, True, tuple1, (r,c))
+                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, True, tuple1, (r,c))
+
+                # Desmarcar después de evaluar
+                graph.mark_node_at(r, c)
 
                 #print(f"{eval} ({r},{c})")               
                 
