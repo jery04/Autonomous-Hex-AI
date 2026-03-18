@@ -345,9 +345,10 @@ class Minimax:
         """
         size = graph.size
         center_r, center_c = size // 2, size // 2
+        max_dist = 2 * (size - 1)
 
-        candidates = []
-        others = []
+        candidates_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
+        others_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
 
         for r in range(size):
             for c in range(size):
@@ -364,16 +365,20 @@ class Minimax:
                 dist_center = abs(r - center_r) + abs(c - center_c)
 
                 if is_adjacent:
-                    candidates.append(((r, c), dist_center))
+                    candidates_by_dist[dist_center].append((r, c))
                 else:
-                    others.append(((r, c), dist_center))
+                    others_by_dist[dist_center].append((r, c))
 
-        # Ordenamos cada grupo por cercanía al centro.
-        candidates.sort(key=lambda x: x[1])
-        others.sort(key=lambda x: x[1])
+        ordered_moves: list[tuple[int, int]] = []
+
+        for dist in range(max_dist + 1):
+            ordered_moves.extend(candidates_by_dist[dist])
+
+        for dist in range(max_dist + 1):
+            ordered_moves.extend(others_by_dist[dist])
 
         # Primero todos los que tocan algo, luego el resto.
-        return [m[0] for m in candidates + others]
+        return ordered_moves
 
     @staticmethod
     def minimax(
@@ -383,8 +388,6 @@ class Minimax:
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,
-        tuple1 = None,
-        tuple2 = None,
     ) -> Tuple[int, Optional[Tuple[int, int]]]:
         """
         Versión estática del minimax. Retorna (valor, mejor_jugada).
@@ -392,7 +395,6 @@ class Minimax:
 
         if turno >= profundidad-1:
             val = Minimax.calculate_heuristic(graph)
-            #print(f"{tuple1} {tuple2} {val}")
             return val, None
 
         moves = Minimax.get_ordered_moves(graph)
@@ -408,12 +410,11 @@ class Minimax:
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.player)
 
-                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, False, (r,c))
+                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, False)
                 
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)  
                 
-                #print(f"{eval} ({r},{c})")
                 if eval is not None and eval > max_eval:
                     max_eval = eval
                     if turno == 0:
@@ -431,18 +432,14 @@ class Minimax:
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.opp)
 
-                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, True, tuple1, (r,c))
+                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, True)
 
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c)
 
-                #print(f"{eval} ({r},{c})")               
-                
                 if eval is not None and eval < min_eval:
                     min_eval = eval
                 beta = min(beta, eval if eval is not None else beta)
                 if beta <= alpha:
                     break
-            #print("")
-
             return min_eval, None
