@@ -496,14 +496,33 @@ class HexNodeGraph:
         return threatened
 
 class Minimax:
-    """Contiene la heurística y el algoritmo minimax como métodos estáticos."""
+    """
+    Contiene la heurística y el algoritmo minimax como métodos estáticos.
+    """
 
     a = 80      # distancia entre extremos
     b = 6       # numero de componentes
     c = 10      # cardinalidad de componente más grande
-    d = 350      # celdas amenazadas
+    d = 35      # celdas amenazadas
     e = 20      # dominio general sobre el tablero
     f = 45      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    
+    @staticmethod
+    def set_weights(*weights) -> None:
+        """
+        Set weights for the heuristic. Accepts either a single iterable
+        (list/tuple) of six numbers or six numeric positional arguments.
+        """
+        # Unpack if a single iterable was passed
+        if len(weights) == 1 and isinstance(weights[0], (list, tuple)):
+            vals = list(weights[0])
+        else:
+            vals = list(weights)
+
+        if len(vals) != 6:
+            raise ValueError("set_weights expects 6 weight values")
+
+        Minimax.a, Minimax.b, Minimax.c, Minimax.d, Minimax.e, Minimax.f = vals
     
     @staticmethod
     def calculate_heuristic(graph: HexNodeGraph, free_node: Optional[Iterable[Tuple[int, int]]] = None) -> Optional[int]:
@@ -551,10 +570,10 @@ class Minimax:
             profundidad = 11
             #a = 1, b=2, c=3, d=4, e=5, f=6
         elif 4 <= size <= 5:
-            profundidad = 5
-            #a = 1, b=2, c=3, d=4, e=5, f=6
+            profundidad = 3
+            Minimax.set_weights(85.8652, 77.575, 76.7384, 38.1143, 7.1665, 86.243)
         elif 6 <= size <= 7:
-            profundidad = 5
+            profundidad = 3
             #a = 1, b=2, c=3, d=4, e=5, f=6
             
 
