@@ -3,6 +3,8 @@ from board import HexBoard
 from typing import List, Tuple, Optional, Set
 import sys
 import math
+import random
+import statistics
 
 
 class SmartPlayer(Player):
@@ -230,7 +232,7 @@ class HexNodeGraph:
             - Jugador 2: arriba-abajo.
         """
         
-        if self.move_counter <  math.floor(self.size*self.size*0.45):
+        if self.move_counter <  math.floor(self.size*self.size*Minimax.f):
             cr = (self.size - 1) // 2
             cc = (self.size - 1) // 2
 
@@ -496,6 +498,13 @@ class HexNodeGraph:
 class Minimax:
     """Contiene la heurística y el algoritmo minimax como métodos estáticos."""
 
+    a = 0.82      # distancia entre extremos
+    b =  0.6      # numero de componentes
+    c =  0.4      # cardinalidad de componente más grande
+    d = 0.18      # celdas amenazadas
+    e = 0.10      # dominio general sobre el tablero
+    f = 0.45      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    
     @staticmethod
     def calculate_heuristic(graph: HexNodeGraph, free_node: List[Tuple[int, int]]) -> Optional[int]:
         if graph is None:
@@ -518,7 +527,7 @@ class Minimax:
         if dist_opp is None:
             return 10000
 
-        return (dist_opp - dist_self) + (comp_num_opp - comp_num_self) + (max_card_self - max_card_opp) + (threat_cells_opp - threat_cells_self) + (board_dom_self - board_dom_opp)
+        return Minimax.a*(dist_opp - dist_self) + Minimax.b*(comp_num_opp - comp_num_self) + Minimax.c*(max_card_self - max_card_opp) + Minimax.d*(threat_cells_opp - threat_cells_self) + Minimax.e*(board_dom_self - board_dom_opp)
 
     @staticmethod
     def preminimax(graph: "HexNodeGraph", board: HexBoard) -> Optional[Tuple[int, int]]:
@@ -545,7 +554,7 @@ class Minimax:
         elif 6 <= size <= 7:
             profundidad = 5
 
-        _, best_move = Minimax.minimax(
+        _, best_move, _ = Minimax.minimax(
             turno=0,
             profundidad=profundidad,
             graph=graph,
@@ -610,27 +619,30 @@ class Minimax:
         beta: int = sys.maxsize,
         maximizing: bool = True,
         moves: Optional[List[Tuple[int, int]]] = None,
-    ) -> Tuple[int, Optional[Tuple[int, int]]]:
+    ) -> Tuple[float, Optional[Tuple[int, int]], float]:
         """
-        Minimax. Retorna (valor, mejor_jugada).
+        Minimax. Retorna (valor, mejor_jugada, promedio_de_hijos_directos).
         """
         if moves is None:
             moves = Minimax.get_ordered_moves(graph)
         elif not moves or turno >= profundidad-1:
             val = Minimax.calculate_heuristic(graph, moves)
-            return val, None
+            leaf_val = 0.0 if val is None else float(val)
+            return leaf_val, None, leaf_val
 
         best_move = None
 
         if maximizing:
             max_eval = -sys.maxsize - 1
+            max_avg = -sys.maxsize - 1
+            child_evals: List[float] = []
             for r, c in moves:
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.player)
 
                 remaining_moves = [m for m in moves if m != (r, c)]
                
-                eval, _ = Minimax.minimax(
+                eval, _, child_avg = Minimax.minimax(
                     turno + 1,
                     profundidad,
                     graph,
@@ -639,22 +651,41 @@ class Minimax:
                     False,
                     remaining_moves,
                 )
+                child_evals.append(eval)
                 
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)  
                 
-                if eval is not None and eval > max_eval:
+                if eval > max_eval:
                     max_eval = eval
+                    max_avg = child_avg
                     if turno == 0:
                         best_move = (r, c)
-                alpha = max(alpha, eval if eval is not None else alpha)
+                elif  round(eval,5) == round(max_eval,5):
+                    if child_avg > max_avg:
+                        # Desempate por promedio de evals directos del subarbol.
+                        max_eval = eval
+                        max_avg = child_avg
+                        if turno == 0:
+                            best_move = (r, c)
+                    elif round(child_avg,5) == round(max_avg,5) and random.randint(0, 1) == 1:
+                        max_eval = eval
+                        max_avg = child_avg
+                        if turno == 0:
+                            best_move = (r, c)
+
+                alpha = max(alpha, eval)
                 if beta <= alpha:
                     break
-            
-            return max_eval, best_move
+
+            avg_children = float(statistics.median(child_evals)) if child_evals else float(max_eval)
+            return float(max_eval), best_move, avg_children
 
         else:
             min_eval = sys.maxsize
+            min_avg = sys.maxsize
+            best_move = None
+            child_evals: List[float] = []
             for r, c in moves:
 
                 # Marcar la jugada
@@ -662,7 +693,7 @@ class Minimax:
 
                 remaining_moves = [m for m in moves if m != (r, c)]
 
-                eval, _ = Minimax.minimax(
+                eval, _, child_avg = Minimax.minimax(
                     turno + 1,
                     profundidad,
                     graph,
@@ -671,13 +702,30 @@ class Minimax:
                     True,
                     remaining_moves,
                 )
+                child_evals.append(eval)
 
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)
 
-                if eval is not None and eval < min_eval:
+                if eval < min_eval:
                     min_eval = eval
-                beta = min(beta, eval if eval is not None else beta)
+                    min_avg = child_avg
+                    if turno == 0:
+                        best_move = (r, c)
+                elif round(eval, 5) == round(min_eval, 5):
+                    if child_avg < min_avg:
+                        min_eval = eval
+                        min_avg = child_avg
+                        if turno == 0:
+                            best_move = (r, c)
+                    elif round(child_avg, 5) == round(min_avg, 5) and random.randint(0, 1) == 1:
+                        min_eval = eval
+                        min_avg = child_avg
+                        if turno == 0:
+                            best_move = (r, c)
+
+                beta = min(beta, eval)
                 if beta <= alpha:
                     break
-            return min_eval, None
+            avg_children = float(statistics.median(child_evals)) if child_evals else float(min_eval)
+            return float(min_eval), best_move, avg_children
