@@ -1,6 +1,6 @@
 from player import Player
 from board import HexBoard
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, Iterable
 import sys
 import math
 import random
@@ -401,7 +401,7 @@ class HexNodeGraph:
 
         return components, max_card
 
-    def count_threatened_free_nodes(self, player: int, free_nodes: Optional[List[Tuple[int, int]]] = None, comp_done: bool = False) -> int:
+    def count_threatened_free_nodes(self, player: int, free_nodes: Optional[Iterable[Tuple[int, int]]] = None, comp_done: bool = False) -> int:
         """
         Cuenta nodos libres que se consideran amenazados respecto a `player`.
 
@@ -498,15 +498,15 @@ class HexNodeGraph:
 class Minimax:
     """Contiene la heurística y el algoritmo minimax como métodos estáticos."""
 
-    a = 0.82      # distancia entre extremos
-    b =  0.6      # numero de componentes
-    c =  0.4      # cardinalidad de componente más grande
-    d = 0.18      # celdas amenazadas
-    e = 0.10      # dominio general sobre el tablero
-    f = 0.45      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    a = 80      # distancia entre extremos
+    b = 6       # numero de componentes
+    c = 10      # cardinalidad de componente más grande
+    d = 350      # celdas amenazadas
+    e = 20      # dominio general sobre el tablero
+    f = 45      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
     
     @staticmethod
-    def calculate_heuristic(graph: HexNodeGraph, free_node: List[Tuple[int, int]]) -> Optional[int]:
+    def calculate_heuristic(graph: HexNodeGraph, free_node: Optional[Iterable[Tuple[int, int]]] = None) -> Optional[int]:
         if graph is None:
             return None
 
@@ -549,10 +549,14 @@ class Minimax:
         
         if size <= 3:
             profundidad = 11
+            #a = 1, b=2, c=3, d=4, e=5, f=6
         elif 4 <= size <= 5:
             profundidad = 5
+            #a = 1, b=2, c=3, d=4, e=5, f=6
         elif 6 <= size <= 7:
             profundidad = 5
+            #a = 1, b=2, c=3, d=4, e=5, f=6
+            
 
         _, best_move, _ = Minimax.minimax(
             turno=0,
@@ -567,7 +571,7 @@ class Minimax:
         return None
 
     @staticmethod
-    def get_ordered_moves(graph: HexNodeGraph) -> list[tuple[int, int]]:
+    def get_ordered_moves(graph: HexNodeGraph) -> Set[Tuple[int, int]]:
         """
         Prioriza:
         1. Casillas adyacentes a fichas ya colocadas (propias o del rival)
@@ -608,7 +612,7 @@ class Minimax:
             ordered_moves.extend(others_by_dist[dist])
 
         # Primero todos los que tocan algo, luego el resto.
-        return ordered_moves
+        return set(ordered_moves)
 
     @staticmethod
     def minimax(
@@ -618,14 +622,15 @@ class Minimax:
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,
-        moves: Optional[List[Tuple[int, int]]] = None,
+        moves: Optional[Set[Tuple[int, int]]] = None,
     ) -> Tuple[float, Optional[Tuple[int, int]], float]:
         """
         Minimax. Retorna (valor, mejor_jugada, promedio_de_hijos_directos).
         """
         if moves is None:
             moves = Minimax.get_ordered_moves(graph)
-        elif not moves or turno >= profundidad-1:
+            
+        if turno >= profundidad-1 or not moves:
             val = Minimax.calculate_heuristic(graph, moves)
             leaf_val = 0.0 if val is None else float(val)
             return leaf_val, None, leaf_val
@@ -637,43 +642,40 @@ class Minimax:
             max_avg = -sys.maxsize - 1
             child_evals: List[float] = []
             for r, c in moves:
+                
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.player)
-
-                remaining_moves = [m for m in moves if m != (r, c)]
+                # Remover la casilla libre
+                moves.remove((r, c))
                
-                eval, _, child_avg = Minimax.minimax(
+                eval, _, child_median = Minimax.minimax(
                     turno + 1,
                     profundidad,
                     graph,
                     alpha,
                     beta,
                     False,
-                    remaining_moves,
+                    moves,
                 )
+                # Guardar evaluación del hijo para calcular el mediana
                 child_evals.append(eval)
                 
+                # Volver a agregar la casilla libre para el siguiente hijo
+                moves.add((r, c))
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)  
                 
-                if eval > max_eval:
+                if eval > max_eval or (abs(eval - max_eval) < 1e-5 and child_median > max_avg):
                     max_eval = eval
-                    max_avg = child_avg
+                    max_avg = child_median
                     if turno == 0:
                         best_move = (r, c)
-                elif  round(eval,5) == round(max_eval,5):
-                    if child_avg > max_avg:
-                        # Desempate por promedio de evals directos del subarbol.
-                        max_eval = eval
-                        max_avg = child_avg
-                        if turno == 0:
-                            best_move = (r, c)
-                    elif round(child_avg,5) == round(max_avg,5) and random.randint(0, 1) == 1:
-                        max_eval = eval
-                        max_avg = child_avg
-                        if turno == 0:
-                            best_move = (r, c)
-
+                elif abs(child_median - max_avg) < 1e-5 and random.randint(0, 1) == 1:
+                    max_eval = eval
+                    max_avg = child_median
+                    if turno == 0:
+                        best_move = (r, c)
+ 
                 alpha = max(alpha, eval)
                 if beta <= alpha:
                     break
@@ -691,38 +693,32 @@ class Minimax:
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.opp)
 
-                remaining_moves = [m for m in moves if m != (r, c)]
+                #remaining_moves = moves - {(r, c)}
+                moves.remove((r, c))
 
-                eval, _, child_avg = Minimax.minimax(
+                eval, _, child_median = Minimax.minimax(
                     turno + 1,
                     profundidad,
                     graph,
                     alpha,
                     beta,
                     True,
-                    remaining_moves,
+                    moves,
                 )
+                # Guardar evaluación del hijo para calcular el mediana
                 child_evals.append(eval)
-
+                
+                # Volver a agregar la casilla libre para el siguiente hijo
+                moves.add((r, c))
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)
 
-                if eval < min_eval:
+                if eval < min_eval or (abs(eval - min_eval) < 1e-5 and child_median < min_avg):
                     min_eval = eval
-                    min_avg = child_avg
-                    if turno == 0:
-                        best_move = (r, c)
-                elif round(eval, 5) == round(min_eval, 5):
-                    if child_avg < min_avg:
-                        min_eval = eval
-                        min_avg = child_avg
-                        if turno == 0:
-                            best_move = (r, c)
-                    elif round(child_avg, 5) == round(min_avg, 5) and random.randint(0, 1) == 1:
-                        min_eval = eval
-                        min_avg = child_avg
-                        if turno == 0:
-                            best_move = (r, c)
+                    min_avg = child_median
+                elif abs(child_median - min_avg) < 1e-5 and random.randint(0, 1) == 1:
+                    min_eval = eval
+                    min_avg = child_median
 
                 beta = min(beta, eval)
                 if beta <= alpha:
