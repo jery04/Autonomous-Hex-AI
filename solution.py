@@ -1,7 +1,8 @@
 from player import Player
 from board import HexBoard
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Set
 import sys
+import math
 
 
 class SmartPlayer(Player):
@@ -38,6 +39,7 @@ class Node:
         self.c = c
         self.neighbors: List["Node"] = []  # lista de Nodos adyacentes
         self.marked = marked
+        self.id_comp: Optional[int] = None  # id de componente conexa (player, comp_id)
 
     def __repr__(self) -> str:
         return f"Node({self.r},{self.c})"
@@ -61,6 +63,7 @@ class HexNodeGraph:
         self.opp: Optional[int] = None
         self.hex_board: Optional[HexBoard] = None
         self.create_node_matrix()
+        self.move_counter = 0
 
     def detect_opponent_move(self, board: HexBoard) -> None:
         """
@@ -206,6 +209,7 @@ class HexNodeGraph:
         if player_id is None:
             node.marked = 0
             self.hex_board.board[r][c] = 0
+            self.move_counter -= 1
             return
 
         if player_id not in (1, 2):
@@ -213,8 +217,53 @@ class HexNodeGraph:
 
         node.marked = player_id
         self.hex_board.board[r][c] = player_id
+        self.move_counter += 1
+        
+    def territorial_control(self, r: int, c: int, player: int = None) -> float:
+        """
+        Retorna valor entre 0 y 1.
 
-    def distance_between_extremes(self, player_id: int) -> Optional[int]:
+        - Si `prioritize_borders` es False: mide cercania al centro.
+        - Si `prioritize_borders` es True: mide cercania a los bordes
+          relevantes para el jugador:
+            - Jugador 1: izquierda-derecha.
+            - Jugador 2: arriba-abajo.
+        """
+        
+        if self.move_counter <  math.floor(self.size*self.size*0.45):
+            cr = (self.size - 1) // 2
+            cc = (self.size - 1) // 2
+
+            # Distancia euclidiana al centro.
+            distancia = ((r - cr) ** 2 + (c - cc) ** 2) ** 0.5
+
+            # Distancia maxima aproximada (esquinas).
+            dist_max = ((0 - cr) ** 2 + (0 - cc) ** 2) ** 0.5
+            if dist_max == 0:
+                return 1.0
+
+            # Normalizamos e invertimos (mas cerca -> valor mas alto).
+            cercania = 1.0 - (distancia / dist_max)
+            return max(0.0, min(1.0, cercania))
+
+        # Estrategia por bordes segun orientacion del jugador.
+        if player == 1:
+            # Jugador 1 conecta izquierda-derecha: importa la distancia al
+            # borde izquierdo o derecho (la minima de ambas).
+            nearest_border_dist = min(c, self.size - 1 - c)
+        else:
+            # Jugador 2 conecta arriba-abajo: importa la distancia al
+            # borde superior o inferior (la minima de ambas).
+            nearest_border_dist = min(r, self.size - 1 - r)
+
+        max_nearest_dist = (self.size - 1) / 2
+        if max_nearest_dist == 0:
+            return 1.0
+
+        cercania_borde = 1.0 - (nearest_border_dist / max_nearest_dist)
+        return max(0.0, min(1.0, cercania_borde))
+
+    def distance_between_extremes(self, player_id: int) -> Optional[Tuple[int, float]]:
         """
         Retorna la distancia ponderada entre extremos usando 0-1 BFS.
 
@@ -242,6 +291,9 @@ class HexNodeGraph:
 
         from collections import deque
 
+        position = 0.0
+        # Evita contar dos veces el mismo nodo propio en distintas rutas/relajaciones.
+        counted_nodes: Set[Node] = set()
         q = deque([a])
         distances = {a: 0}
 
@@ -257,6 +309,11 @@ class HexNodeGraph:
                 if neigh_mark not in (0, player_id):
                     continue
 
+                if neigh_mark == player_id and neigh not in counted_nodes:
+                    if 0 <= neigh.r < self.size and 0 <= neigh.c < self.size:
+                        position += self.territorial_control(neigh.r, neigh.c, player_id)
+                    counted_nodes.add(neigh)
+
                 step = 0 if neigh_mark == player_id else 1
                 candidate = current_dist + step
 
@@ -269,35 +326,199 @@ class HexNodeGraph:
                         q.append(neigh)
 
         if b not in distances:
-            return None
+            return None, position
         
-        #for node in distances:
-        #    print(f"{node} {distances[node]}")
-            
         result = max(distances[b], 0)
-        return result
+        return result, position
+
+    def count_components(self, player: int) -> Tuple[int, int]:
+        """
+        Cuenta el número de componentes conexas y la cardinalidad de la
+        componente más grande considerando solamente nodos de la matriz
+        con `marked == player`.
+
+        Retorna `(num_componentes, max_cardinalidad)`.
+        """
+        if not self.matrix:
+            return 0, 0
+
+        if player not in (1, 2):
+            raise ValueError("player must be 1 or 2")
+
+        n = self.size
+        matrix = self.matrix
+        visited = [0] * (n * n)
+        components = 0
+        max_card = 0
+
+        for r in range(n):
+            row = matrix[r]
+            row_base = r * n
+            for c in range(n):
+                idx = row_base + c
+                if visited[idx]:
+                    continue
+
+                start = row[c]
+                if start.marked != player:
+                    continue
+
+                # Nueva componente: DFS
+                components += 1
+                comp_id = components
+                stack = [(r, c)]
+                visited[idx] = 1
+                start.id_comp = comp_id
+                card = 0
+
+                while stack:
+                    cr, cc = stack.pop()
+                    node = matrix[cr][cc]
+                    card += 1
+
+                    for neigh in node.neighbors:
+                        nr, nc = neigh.r, neigh.c
+                        # Ignorar extremos (coordenadas negativas)
+                        if not (0 <= nr < n and 0 <= nc < n):
+                            continue
+
+                        nidx = nr * n + nc
+                        if visited[nidx]:
+                            continue
+
+                        neigh_node = matrix[nr][nc]
+                        if neigh_node.marked != player:
+                            continue
+
+                        visited[nidx] = 1
+                        neigh_node.id_comp = comp_id
+                        stack.append((nr, nc))
+
+                if card > max_card:
+                    max_card = card
+
+        return components, max_card
+
+    def count_threatened_free_nodes(self, player: int, free_nodes: Optional[List[Tuple[int, int]]] = None, comp_done: bool = False) -> int:
+        """
+        Cuenta nodos libres que se consideran amenazados respecto a `player`.
+
+        Si se proporciona `free_nodes` (lista de coordenadas `(r, c)`),
+        se iterará sólo sobre esa lista. Si no se
+        proporciona, se recorre toda la matriz como antes.
+
+        Un nodo libre se considera amenazado para `player` si entre sus
+        vecinos hay al menos dos nodos marcados por `player` que pertenezcan
+        a componentes conexas distintas (tienen `id_comp` distintos).
+        """
+        if not self.matrix:
+            return 0
+
+        if player not in (1, 2):
+            raise ValueError("player must be 1 or 2")
+
+        matrix = self.matrix
+        n = self.size
+        # Calcular id_comp sólo para el jugador indicado
+        
+        if comp_done:
+            self.count_components(player)
+
+        threatened = 0
+
+        # Recorrido completo (hot path): evitar generadores y excepciones.
+        if free_nodes is None:
+            for r in range(n):
+                row = matrix[r]
+                for c in range(n):
+                    node = row[c]
+                    if node.marked != 0:
+                        continue
+
+                    first_comp = None
+                    for neigh in node.neighbors:
+                        nr, nc = neigh.r, neigh.c
+
+                        # Ignorar extremos y cualquier vecino fuera de matriz.
+                        if nr < 0 or nr >= n or nc < 0 or nc >= n:
+                            continue
+
+                        neigh_node = matrix[nr][nc]
+                        if neigh_node.marked != player:
+                            continue
+
+                        comp = neigh_node.id_comp
+                        if comp is None:
+                            continue
+
+                        if first_comp is None:
+                            first_comp = comp
+                        elif comp != first_comp:
+                            threatened += 1
+                            break
+        else:
+            for coords in free_nodes:
+                # Validar entrada de forma barata: se esperan tuplas (r, c).
+                if not isinstance(coords, (tuple, list)) or len(coords) != 2:
+                    continue
+
+                rr, cc = coords
+                if rr < 0 or rr >= n or cc < 0 or cc >= n:
+                    continue
+
+                node = matrix[rr][cc]
+                if node.marked != 0:
+                    continue
+
+                first_comp = None
+                for neigh in node.neighbors:
+                    nr, nc = neigh.r, neigh.c
+
+                    if nr < 0 or nr >= n or nc < 0 or nc >= n:
+                        continue
+
+                    neigh_node = matrix[nr][nc]
+                    if neigh_node.marked != player:
+                        continue
+
+                    comp = neigh_node.id_comp
+                    if comp is None:
+                        continue
+
+                    if first_comp is None:
+                        first_comp = comp
+                    elif comp != first_comp:
+                        threatened += 1
+                        break
+
+        return threatened
 
 class Minimax:
     """Contiene la heurística y el algoritmo minimax como métodos estáticos."""
 
     @staticmethod
-    def calculate_heuristic(graph: HexNodeGraph) -> Optional[int]:
+    def calculate_heuristic(graph: HexNodeGraph, free_node: List[Tuple[int, int]]) -> Optional[int]:
         if graph is None:
             return None
 
         if graph.player not in (1, 2) or graph.opp not in (1, 2):
             return None
 
-        d_self = graph.distance_between_extremes(graph.player)
-        d_opponent = graph.distance_between_extremes(graph.opp)
+        dist_self, board_dom_self  = graph.distance_between_extremes(graph.player)
+        dist_opp, board_dom_opp = graph.distance_between_extremes(graph.opp)
         
-        if d_self is None:
-            return -1000
+        comp_num_self, max_card_self = graph.count_components(graph.player)
+        comp_num_opp, max_card_opp = graph.count_components(graph.opp) 
         
-        if d_opponent is None:
-            return 1000
+        threat_cells_self = graph.count_threatened_free_nodes(graph.player, free_node)
+        threat_cells_opp = graph.count_threatened_free_nodes(graph.opp, free_node)
+        
+        if dist_self is None:
+            return -10000
+        if dist_opp is None:
+            return 10000
 
-        return d_opponent - d_self
+        return (dist_opp - dist_self) + (comp_num_opp - comp_num_self) + (max_card_self - max_card_opp) + (threat_cells_opp - threat_cells_self) + (board_dom_self - board_dom_opp)
 
     @staticmethod
     def preminimax(graph: "HexNodeGraph", board: HexBoard) -> Optional[Tuple[int, int]]:
@@ -388,19 +609,16 @@ class Minimax:
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,
+        moves: Optional[List[Tuple[int, int]]] = None,
     ) -> Tuple[int, Optional[Tuple[int, int]]]:
         """
-        Versión estática del minimax. Retorna (valor, mejor_jugada).
+        Minimax. Retorna (valor, mejor_jugada).
         """
-
-        if turno >= profundidad-1:
-            val = Minimax.calculate_heuristic(graph)
+        if moves is None:
+            moves = Minimax.get_ordered_moves(graph)
+        elif not moves or turno >= profundidad-1:
+            val = Minimax.calculate_heuristic(graph, moves)
             return val, None
-
-        moves = Minimax.get_ordered_moves(graph)
-        
-        if not moves:
-            return Minimax.calculate_heuristic(graph), None
 
         best_move = None
 
@@ -410,7 +628,17 @@ class Minimax:
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.player)
 
-                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, False)
+                remaining_moves = [m for m in moves if m != (r, c)]
+               
+                eval, _ = Minimax.minimax(
+                    turno + 1,
+                    profundidad,
+                    graph,
+                    alpha,
+                    beta,
+                    False,
+                    remaining_moves,
+                )
                 
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)  
@@ -432,10 +660,20 @@ class Minimax:
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.opp)
 
-                eval, _ = Minimax.minimax(turno + 1, profundidad, graph, alpha, beta, True)
+                remaining_moves = [m for m in moves if m != (r, c)]
+
+                eval, _ = Minimax.minimax(
+                    turno + 1,
+                    profundidad,
+                    graph,
+                    alpha,
+                    beta,
+                    True,
+                    remaining_moves,
+                )
 
                 # Desmarcar después de evaluar
-                graph.mark_node_at(r, c)
+                graph.mark_node_at(r, c, None)
 
                 if eval is not None and eval < min_eval:
                     min_eval = eval
