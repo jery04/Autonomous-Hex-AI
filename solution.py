@@ -667,7 +667,7 @@ class Minimax:
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)  
                 
-                if eval > max_eval or (abs(eval - max_eval) < 1e-5 and random.randint(0, 1) == 1):
+                if eval > max_eval:
                     max_eval = eval
                     if turno == 0:
                         best_move = (r, c)
@@ -705,7 +705,7 @@ class Minimax:
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)
 
-                if eval < min_eval or (abs(eval - min_eval) < 1e-5 and random.randint(0, 1) == 1):
+                if eval < min_eval:
                     min_eval = eval
 
                 beta = min(beta, eval)
