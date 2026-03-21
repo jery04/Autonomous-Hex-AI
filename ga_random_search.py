@@ -3,7 +3,7 @@ import argparse
 import time
 from typing import List, Tuple
 from multiprocessing import Pool, cpu_count
-from solution import Minimax, HexNodeGraph
+from solution import Minimax, HexGraph
 from board import HexBoard
 
 Vector = List[float]
@@ -41,7 +41,7 @@ def random_vector() -> Vector:
     return [random.uniform(lo, hi) for (lo, hi) in RANGES]
 
 def set_weights(weights: Vector) -> None:
-    Minimax.a, Minimax.b, Minimax.c, Minimax.d, Minimax.e, Minimax.f = weights
+    Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
 
 def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
     """Play one game and return (winner id, winner_move_count, avg_seconds_per_move)
@@ -50,8 +50,8 @@ def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
     per move for the winner. For draws or aborted games returns (0,0,0).
     """
     board = HexBoard(size)
-    g1 = HexNodeGraph(size=size, player_id=1)
-    g2 = HexNodeGraph(size=size, player_id=2)
+    g1 = HexGraph(size=size, player_id=1)
+    g2 = HexGraph(size=size, player_id=2)
     turn = 0
     max_moves = size * size
 

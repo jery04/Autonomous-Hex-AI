@@ -10,7 +10,7 @@ import statistics
 class SmartPlayer(Player):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.graph: Optional[HexNodeGraph] = None
+        self.graph: Optional[HexGraph] = None
 
     def update_graphs(self, board: HexBoard) -> None:
         """
@@ -18,7 +18,7 @@ class SmartPlayer(Player):
         """
         # Reuse existing graphs if present; create them if not.
         if self.graph is None:
-            self.graph = HexNodeGraph(size=board.size, player_id=self.player_id)
+            self.graph = HexGraph(size=board.size, player_id=self.player_id)
         
     def play(self, board: HexBoard) -> tuple:
 
@@ -46,7 +46,7 @@ class Node:
     def __repr__(self) -> str:
         return f"Node({self.r},{self.c})"
 
-class HexNodeGraph:
+class HexGraph:
     """
     Clase que crea una matriz de `Node` y añade dos nodos extremos.
     - `create_node_matrix(size, orientation)` crea la matriz y enlaza vecinos.
@@ -72,7 +72,7 @@ class HexNodeGraph:
         Recibe un `HexBoard` y devuelve la coordenada (row, col) de una nueva 
         ficha puesta por el adversario 
         """
-        print(len(self.free_cells))
+        
         for (r, c) in self.free_cells:
             if board.board[r][c] != 0:
                 self.mark_node_at(r, c, self.opp)
@@ -200,7 +200,7 @@ class HexNodeGraph:
             - Jugador 2: arriba-abajo.
         """
         
-        if self.move_counter <  math.floor(self.size * self.size * Minimax.f / 100):
+        if self.move_counter <  math.floor(self.size * self.size * Minimax.ctrl_board / 100):
             cr = (self.size - 1) // 2
             cc = (self.size - 1) // 2
 
@@ -468,12 +468,12 @@ class Minimax:
     Contiene la heurística y el algoritmo minimax como métodos estáticos.
     """
 
-    a = 130.9652      # distancia entre extremos
-    b = 21.5188       # numero de componentes
-    c = 19.7512      # cardinalidad de componente más grande
-    d = 120.2703      # celdas amenazadas
-    e = 73.6211     # dominio general sobre el tablero
-    f = 31.5804      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    distance = 130.9652      # distancia entre extremos
+    components = 21.5188       # numero de componentes
+    max_component = 19.7512      # cardinalidad de componente más grande
+    threats = 120.2703      # celdas amenazadas
+    territory = 73.6211     # dominio general sobre el tablero
+    ctrl_board = 31.5804      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
     
     @staticmethod
     def set_weights(*weights) -> None:
@@ -490,10 +490,10 @@ class Minimax:
         if len(vals) != 6:
             raise ValueError("set_weights expects 6 weight values")
 
-        Minimax.a, Minimax.b, Minimax.c, Minimax.d, Minimax.e, Minimax.f = vals
+        Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = vals
     
     @staticmethod
-    def calculate_heuristic(graph: HexNodeGraph, free_node: Optional[Iterable[Tuple[int, int]]] = None) -> Optional[int]:
+    def calculate_heuristic(graph: HexGraph, free_node: Optional[Iterable[Tuple[int, int]]] = None) -> Optional[int]:
         if graph is None:
             return None
 
@@ -514,10 +514,10 @@ class Minimax:
         if dist_opp is None:
             return 10000
 
-        return Minimax.a*(dist_opp - dist_self) + Minimax.b*(comp_num_opp - comp_num_self) + Minimax.c*(max_card_self - max_card_opp) + Minimax.d*(threat_cells_opp - threat_cells_self) + Minimax.e*(board_dom_self - board_dom_opp)
+        return Minimax.distance*(dist_opp - dist_self) + Minimax.components*(comp_num_opp - comp_num_self) + Minimax.max_component*(max_card_self - max_card_opp) + Minimax.threats*(threat_cells_opp - threat_cells_self) + Minimax.territory*(board_dom_self - board_dom_opp)
 
     @staticmethod
-    def preminimax(graph: "HexNodeGraph", board: HexBoard) -> Optional[Tuple[int, int]]:
+    def preminimax(graph: "HexGraph", board: HexBoard) -> Optional[Tuple[int, int]]:
         """
         Selecciona una profundidad adecuada en función del tamaño del grafo
         y llama a `minimax`. Retorna el (valor, mejor_jugada).
@@ -538,9 +538,11 @@ class Minimax:
             profundidad = 11
             #a = 1, b=2, c=3, d=4, e=5, f=6
         elif 4 <= size <= 5:
-            if graph.move_counter > 12:
-                profundidad = 7
-            else: profundidad = 5
+            profundidad = 5
+            #164.8978, 7.6193, 31.2489, 89.6845, 66.9143, 27.9527
+            #169.5289, 4.0, 30.9841, 78.4032, 86.1154, 30.2524
+            #130.9652, 21.5188, 19.7512, 120.2703, 73.6211, 31.5804
+            #125.7379, 19.3651, 16.104, 114.8725, 72.9301, 33.5532
             Minimax.set_weights(169.5289, 4.0, 30.9841, 78.4032, 86.1154, 30.2524)
         elif 6 <= size <= 7:
             profundidad = 3
@@ -560,7 +562,7 @@ class Minimax:
         return None
 
     @staticmethod
-    def get_ordered_moves(graph: HexNodeGraph) -> Set[Tuple[int, int]]:
+    def get_ordered_moves(graph: HexGraph) -> Set[Tuple[int, int]]:
         """
         Prioriza:
         1. Casillas adyacentes a fichas ya colocadas (propias o del rival)
@@ -604,7 +606,7 @@ class Minimax:
     def minimax(
         turno: int,
         profundidad: int,
-        graph: HexNodeGraph,
+        graph: HexGraph,
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,

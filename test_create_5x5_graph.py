@@ -1,9 +1,9 @@
-from solution import HexNodeGraph, Minimax
+from solution import HexGraph, Minimax
 from board import HexBoard
 import time
 
 def test_create_5x5_graph():
-    b1 = HexNodeGraph(5,2)
+    b1 = HexGraph(5,2)
     
     # marcar
     b1.mark_node_at(0, 3, 2)
