@@ -58,61 +58,37 @@ class HexNodeGraph:
         self.size = size
         self.player = player_id
         self.matrix: List[List[Node]] = []
+        self.free_cells: Set[Tuple[int, int]] = set()
         self.node_left: Optional[Node] = None
         self.node_right: Optional[Node] = None
         self.node_up: Optional[Node] = None
         self.node_bottom: Optional[Node] = None
         self.opp: Optional[int] = None
-        self.hex_board: Optional[HexBoard] = None
         self.create_node_matrix()
         self.move_counter = 0
 
     def detect_opponent_move(self, board: HexBoard) -> None:
         """
-        Recibe un `HexBoard`, guarda una copia en `hex_board` y devuelve
-        la coordenada (row, col) de una nueva ficha puesta por el adversario
-        (id opuesto a `self.player`) comparando con la última copia guardada.
-
-        - Si no hay `self.player` definido, devuelve None.
-        - Si no había tablero previo guardado, sólo guarda el tablero y devuelve None.
-        - Si detecta múltiples cambios devuelve la primera encontrada.
+        Recibe un `HexBoard` y devuelve la coordenada (row, col) de una nueva 
+        ficha puesta por el adversario 
         """
-        
-        prev = self.hex_board.board if self.hex_board else None
-        curr = board.board
-
-        if len(prev) != len(curr):
-            # tamaños distintos: actualizar y salir
-            self.hex_board = board.clone()
-            return None
-
-        size = len(curr)
-        for r in range(size):
-            for c in range(size):
-                # detectar cualquier cambio en la posición que ahora pertenece
-                # al adversario; terminar y devolver la primera encontrada
-                if prev[r][c] != curr[r][c] and curr[r][c] == self.opp:
-                    self.mark_node_at(r, c, self.opp)
-                    return None
-
+        print(len(self.free_cells))
+        for (r, c) in self.free_cells:
+            if board.board[r][c] != 0:
+                self.mark_node_at(r, c, self.opp)
+                return None
+            
         return None
 
     def is_cell_available(self, r: int, c: int) -> bool:
-        """Comprueba la casilla (r,c) en `HexNodeGraph.hex_board`.
-
-        Devuelve True si existe `hex_board` y la posición contiene 0,
-        en cualquier otro caso devuelve False (fuera de rango o no inicializado).
         """
-        board = self.hex_board
-        if board is None:
+        Devuelve True si existe (r, c) está desocupada
+        """
+        
+        if not (0 <= r < self.size and 0 <= c < self.size):
             return False
 
-        size = board.size
-
-        if not (0 <= r < size and 0 <= c < size):
-            return False
-
-        return self.matrix[r][c].marked == 0
+        return (r, c) in self.free_cells
 
     def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
         # Vecinos en un tablero hexagonal (offset coordinates).
@@ -143,10 +119,6 @@ class HexNodeGraph:
         if self.player not in (1, 2):
             raise ValueError("orientation must be 1 (L-R) or 2 (T-B)")
 
-        # Si no hay tablero previo, inicializarlo (variable de clase)
-        if self.hex_board is None:
-            self.hex_board = HexBoard(size= self.size)
-
         matrix: List[List[Node]] = [[Node(r, c) for c in range(self.size)] for r in range(self.size)]
         # Guardar el id del jugador, pero no usarlo para decidir qué extremos
         # conectar: creamos los cuatro nodos extremos y los enlazamos todos.
@@ -154,6 +126,7 @@ class HexNodeGraph:
 
         for r in range(self.size):
             for c in range(self.size):
+                self.free_cells.add((r, c))
                 neigh_coords = self._neighbors(r, c)
                 node = matrix[r][c]
                 node.neighbors = []
@@ -198,28 +171,23 @@ class HexNodeGraph:
           fuera de rango.
         - Lanza `ValueError` si la posición ya es `None` (nodo eliminado).
         """
-        if not self.matrix:
-            raise IndexError("matrix is empty")
-        size = len(self.matrix)
-        if not (0 <= r < size and 0 <= c < size):
-            raise IndexError("coordinates out of range")
 
         node = self.matrix[r][c]
-        if node is None:
-            raise ValueError("node at given coordinates is None")
 
+        # Desmarcar (player_id is None)
         if player_id is None:
+            # Solo decrementar contador si antes estaba marcado.
+            if node.marked != 0:
+                self.move_counter -= 1
             node.marked = 0
-            self.hex_board.board[r][c] = 0
-            self.move_counter -= 1
+            # Añadir a free_cells
+            self.free_cells.add((r, c))
             return
-
-        if player_id not in (1, 2):
-            raise ValueError("player_id must be 1 or 2")
-
-        node.marked = player_id
-        self.hex_board.board[r][c] = player_id
-        self.move_counter += 1
+        elif node.marked == 0:
+            # Si la casilla estaba libre, actualizar move_counter y quitar de free_cells
+            self.move_counter += 1
+            self.free_cells.discard((r, c))
+            node.marked = player_id
         
     def territorial_control(self, r: int, c: int, player: int = None) -> float:
         """
@@ -232,7 +200,7 @@ class HexNodeGraph:
             - Jugador 2: arriba-abajo.
         """
         
-        if self.move_counter <  math.floor(self.size*self.size*Minimax.f):
+        if self.move_counter <  math.floor(self.size * self.size * Minimax.f / 100):
             cr = (self.size - 1) // 2
             cc = (self.size - 1) // 2
 
@@ -500,12 +468,12 @@ class Minimax:
     Contiene la heurística y el algoritmo minimax como métodos estáticos.
     """
 
-    a = 80      # distancia entre extremos
-    b = 6       # numero de componentes
-    c = 10      # cardinalidad de componente más grande
-    d = 35      # celdas amenazadas
-    e = 20      # dominio general sobre el tablero
-    f = 45      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    a = 130.9652      # distancia entre extremos
+    b = 21.5188       # numero de componentes
+    c = 19.7512      # cardinalidad de componente más grande
+    d = 120.2703      # celdas amenazadas
+    e = 73.6211     # dominio general sobre el tablero
+    f = 31.5804      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
     
     @staticmethod
     def set_weights(*weights) -> None:
@@ -570,14 +538,16 @@ class Minimax:
             profundidad = 11
             #a = 1, b=2, c=3, d=4, e=5, f=6
         elif 4 <= size <= 5:
-            profundidad = 3
-            Minimax.set_weights(85.8652, 77.575, 76.7384, 38.1143, 7.1665, 86.243)
+            if graph.move_counter > 12:
+                profundidad = 7
+            else: profundidad = 5
+            Minimax.set_weights(169.5289, 4.0, 30.9841, 78.4032, 86.1154, 30.2524)
         elif 6 <= size <= 7:
             profundidad = 3
             #a = 1, b=2, c=3, d=4, e=5, f=6
             
 
-        _, best_move, _ = Minimax.minimax(
+        _, best_move = Minimax.minimax(
             turno=0,
             profundidad=profundidad,
             graph=graph,
@@ -603,24 +573,21 @@ class Minimax:
         candidates_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
         others_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
 
-        for r in range(size):
-            for c in range(size):
-                if not graph.is_cell_available(r, c):
-                    continue
+        for (r, c) in graph.free_cells:
 
-                is_adjacent = False
-                for nr, nc in graph._neighbors(r, c):
-                    if 0 <= nr < size and 0 <= nc < size:
-                        if graph.matrix[nr][nc].marked != 0:
-                            is_adjacent = True
-                            break
+            is_adjacent = False
+            for nr, nc in graph._neighbors(r, c):
+                if 0 <= nr < size and 0 <= nc < size:
+                    if graph.matrix[nr][nc].marked != 0:
+                        is_adjacent = True
+                        break
 
-                dist_center = abs(r - center_r) + abs(c - center_c)
+            dist_center = abs(r - center_r) + abs(c - center_c)
 
-                if is_adjacent:
-                    candidates_by_dist[dist_center].append((r, c))
-                else:
-                    others_by_dist[dist_center].append((r, c))
+            if is_adjacent:
+                candidates_by_dist[dist_center].append((r, c))
+            else:
+                others_by_dist[dist_center].append((r, c))
 
         ordered_moves: list[tuple[int, int]] = []
 
@@ -652,14 +619,13 @@ class Minimax:
         if turno >= profundidad-1 or not moves:
             val = Minimax.calculate_heuristic(graph, moves)
             leaf_val = 0.0 if val is None else float(val)
-            return leaf_val, None, leaf_val
+            return leaf_val, None
 
         best_move = None
 
         if maximizing:
             max_eval = -sys.maxsize - 1
-            max_avg = -sys.maxsize - 1
-            child_evals: List[float] = []
+
             for r, c in moves:
                 
                 # Marcar la jugada
@@ -667,7 +633,7 @@ class Minimax:
                 # Remover la casilla libre
                 moves.remove((r, c))
                
-                eval, _, child_median = Minimax.minimax(
+                eval, _ = Minimax.minimax(
                     turno + 1,
                     profundidad,
                     graph,
@@ -676,22 +642,15 @@ class Minimax:
                     False,
                     moves,
                 )
-                # Guardar evaluación del hijo para calcular el mediana
-                child_evals.append(eval)
                 
                 # Volver a agregar la casilla libre para el siguiente hijo
                 moves.add((r, c))
+                
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)  
                 
-                if eval > max_eval or (abs(eval - max_eval) < 1e-5 and child_median > max_avg):
+                if eval > max_eval or (abs(eval - max_eval) < 1e-5 and random.randint(0, 1) == 1):
                     max_eval = eval
-                    max_avg = child_median
-                    if turno == 0:
-                        best_move = (r, c)
-                elif abs(child_median - max_avg) < 1e-5 and random.randint(0, 1) == 1:
-                    max_eval = eval
-                    max_avg = child_median
                     if turno == 0:
                         best_move = (r, c)
  
@@ -699,14 +658,11 @@ class Minimax:
                 if beta <= alpha:
                     break
 
-            avg_children = float(statistics.median(child_evals)) if child_evals else float(max_eval)
-            return float(max_eval), best_move, avg_children
+            return float(max_eval), best_move
 
         else:
             min_eval = sys.maxsize
-            min_avg = sys.maxsize
-            best_move = None
-            child_evals: List[float] = []
+            
             for r, c in moves:
 
                 # Marcar la jugada
@@ -715,7 +671,7 @@ class Minimax:
                 #remaining_moves = moves - {(r, c)}
                 moves.remove((r, c))
 
-                eval, _, child_median = Minimax.minimax(
+                eval, _ = Minimax.minimax(
                     turno + 1,
                     profundidad,
                     graph,
@@ -724,23 +680,17 @@ class Minimax:
                     True,
                     moves,
                 )
-                # Guardar evaluación del hijo para calcular el mediana
-                child_evals.append(eval)
-                
+
                 # Volver a agregar la casilla libre para el siguiente hijo
                 moves.add((r, c))
+                
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, None)
 
-                if eval < min_eval or (abs(eval - min_eval) < 1e-5 and child_median < min_avg):
+                if eval < min_eval or (abs(eval - min_eval) < 1e-5 and random.randint(0, 1) == 1):
                     min_eval = eval
-                    min_avg = child_median
-                elif abs(child_median - min_avg) < 1e-5 and random.randint(0, 1) == 1:
-                    min_eval = eval
-                    min_avg = child_median
 
                 beta = min(beta, eval)
                 if beta <= alpha:
                     break
-            avg_children = float(statistics.median(child_evals)) if child_evals else float(min_eval)
-            return float(min_eval), best_move, avg_children
+            return float(min_eval), best_move
