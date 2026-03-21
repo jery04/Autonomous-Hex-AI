@@ -26,7 +26,7 @@ class SmartPlayer(Player):
         if board.size <= 7:
             # Sincronizar y actualizar grafos a partir del tablero
             self.update_graphs(board) 
-            
+                
             # Usar preminimax para elegir profundidad según tamaño
             return Minimax.preminimax(self.graph, board)
         else:
@@ -503,24 +503,40 @@ class Minimax:
           separate numbers or a single iterable of six numbers).
         """
         presets = [
-            [164.8978, 7.6193, 31.2489, 89.6845, 66.9143, 27.9527],
-            [246.6303, 69.2294, 76.1603, 172.2293, 49.068, 20.2236],
-            [256.2148, 87.1538, 58.8399, 97.8713, 41.2106, 30.1494],
-            [92.0739, 80.7917, 75.5324, 38.1143, 5.2127, 86.243],
-            [85.8652, 77.575, 76.7384, 38.1143, 7.1665, 86.243],
-            [54.3206, 117.9748, 92.1444, 81.1457, 13.3394, 65.0],
-            [180, 35, 15, 160, 55, 45],          # agresivo threats
-            [140, 40, 25, 110, 80, 40],          # equilibrado clásico
-            [100, 60, 50, 90, 120, 60],          # territorial / clusters grandes
-            [200, 25, 18, 200, 60, 35],          # distancia y amenazas muy fuertes
-            [160, 40, 25, 130, 70, 50],          # buen punto medio 2025-2026
-            [120, 45, 30, 100, 90, 80],          # si ctrl_board es útil en apertura
+            # Muy agresivo en conexión (prioridad máxima a distance + threats)
+            [240, 10, 5, 150, 60, 30],
+
+            # Agresivo equilibrado (distance muy alto, threats fuerte)
+            [220, 15, 8, 140, 70, 45],
+
+            # Distance + threats fuerte, algo más de territorio
+            [200, 20, 10, 130, 80, 50],
+
+            # Punto medio sólido (buen balance para la mayoría de tableros)
+            [180, 25, 12, 110, 90, 55],
+
+            # Más territorial / influencia espacial (útil en tableros ≥11×11)
+            [160, 30, 15, 100, 110, 70],
+
+            # Distance + threats muy altos (estilo "Queenbee-like" clásico)
+            [250, 5, 0, 180, 50, 25],
+
+            # Control central fuerte (si ctrl_board mide bien bordes/centro)
+            [170, 20, 10, 120, 85, 90],
+
+            # Versión conservadora (más threats para defender, menos riesgo)
+            [190, 15, 5, 160, 75, 40],
+
+            # Alta distancia + amenazas, bajo todo lo demás
+            [230, 8, 3, 170, 55, 35],
+
+            # Equilibrado moderno (inspirado en bots 2020s con algo de ctrl)
+            [210, 18, 10, 125, 95, 60],
         ]
 
         # If graph provided and early game (<= 2 moves), pick a random preset.
         if graph.move_counter <= 2:
             weights = random.choice(presets)
-            print(weights)
 
         Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
     
@@ -531,10 +547,10 @@ class Minimax:
 
         if graph.player not in (1, 2) or graph.opp not in (1, 2):
             return None
-
+            
         dist_self, board_dom_self  = graph.distance_between_extremes(graph.player)
         dist_opp, board_dom_opp = graph.distance_between_extremes(graph.opp)
-        
+            
         comp_num_self, max_card_self = graph.count_components(graph.player)
         comp_num_opp, max_card_opp = graph.count_components(graph.opp) 
         
@@ -565,7 +581,7 @@ class Minimax:
         graph.detect_opponent_move(board)  
 
         # Ajustar pesos según el torneo (pasamos el grafo para decidir presets)
-        Minimax.set_weights(16.9283, 2.8124, 5.1506, 16.7625, 1, 3.4640, graph=graph)
+        Minimax.set_weights(16.9283, 2.8124, 5.1506, 16.7625, 1, 43.4143, graph=graph)
         
         size = graph.size
         
