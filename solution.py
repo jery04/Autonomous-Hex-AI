@@ -508,6 +508,7 @@ class Minimax:
             [256.2148, 87.1538, 58.8399, 97.8713, 41.2106, 30.1494],
             [92.0739, 80.7917, 75.5324, 38.1143, 5.2127, 86.243],
             [85.8652, 77.575, 76.7384, 38.1143, 7.1665, 86.243],
+            [54.3206, 117.9748, 92.1444, 81.1457, 13.3394, 65.0]
         ]
 
         # If graph provided and early game (<= 2 moves), pick a random preset.
@@ -564,7 +565,7 @@ class Minimax:
         if size <= 3:
             profundidad = 11
         elif 4 <= size <= 5:
-            profundidad = 5
+            profundidad = 3
         elif 6 <= size <= 7:
             profundidad = 3
             

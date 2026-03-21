@@ -63,6 +63,17 @@ def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
     # maximum single-move time observed for each player
     max_move_time_p1 = 0.0
     max_move_time_p2 = 0.0
+    
+    if turn == 0:
+        r = random.randint(0, size - 1)
+        c = random.randint(0, size - 1)
+        g1.mark_node_at(r, c, 1)
+        board.place_piece(r, c, 1)
+    else:
+        r = random.randint(0, size - 1)
+        c = random.randint(0, size - 1)
+        g2.mark_node_at(r, c, 2)
+        board.place_piece(r, c, 2)
 
     for _ in range(max_moves):
         move_t0 = time.time()
@@ -117,7 +128,7 @@ def fitness(
     time_weight: float = 0.5,
     board_sizes: List[int] = [4, 5],
 ) -> float:
-    """Return score (%) vs opponents on 4x4 and 5x5.
+    """Return score (%) vs opponents on nxn.
 
     Score combines win rate and speed of wins using `move_counter` and real
     elapsed time. `move_weight` and `time_weight` control the contribution of
@@ -129,7 +140,7 @@ def fitness(
 
     for game_idx in range(n_games):
         # opponent sampled in a neighbourhood around OPPONENT_CENTER
-        opponent = random_vector()
+        opponent = neighbor_vector(OPPONENT_CENTER, delta=10.0)
         # choose a board size for this game from the provided list
         size = random.choice(board_sizes)
         max_moves = size * size
@@ -147,6 +158,7 @@ def fitness(
                 # normalize time: compare average seconds per move to baseline 0.05s
                 max_time = 0.05
                 time_speed_bonus_sum += max(0.0, (max_time - winner_time) / max_time)
+                
         else:
             winner, winner_moves, winner_time, max_p1, max_p2 = play_match(size, opponent, individuo)
             # If the individuo (player 2) made any move > threshold, give very bad score
@@ -174,7 +186,7 @@ def fitness(
     return final_score
 
 def init_population(pop_size: int) -> List[List[float]]:
-    return [neighbor_vector(OPPONENT_CENTER, 50) for _ in range(pop_size)]
+    return [random_vector() for _ in range(pop_size)]
 
 def tournament_selection(pop: List[Vector], fitnesses: List[float], k: int = 3) -> Vector:
     selected = random.sample(range(len(pop)), k)
@@ -204,7 +216,7 @@ def ga_optimize(
     seed: int = None,
     top_frac: float = 0.05,
     n_games: int = 24,
-    board_sizes: List[int] = [3],
+    board_sizes: List[int] = [5],
 ):
     if seed is not None:
         random.seed(seed)
@@ -265,16 +277,16 @@ def ga_optimize(
 
 def main():
     parser = argparse.ArgumentParser(description="GA tuner for Minimax weights (a..f) based on match win rate")
-    parser.add_argument("--pop", type=int, default=160)
+    parser.add_argument("--pop", type=int, default=60)
     parser.add_argument("--gen", type=int, default=15)
     parser.add_argument("--pc", type=float, default=0.75)
     parser.add_argument("--pm", type=float, default=0.18)
-    parser.add_argument("--n_games", type=int, default=21)
+    parser.add_argument("--n_games", type=int, default=31)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
         "--sizes",
         type=str,
-        default="3",
+        default="5,4",
         help="Comma-separated list of board sizes to evaluate, e.g. 3",
     )
     args = parser.parse_args()
