@@ -484,12 +484,12 @@ class Minimax:
     Contiene la heurística y el algoritmo minimax como métodos estáticos.
     """
 
-    distance = 130.9652      # distancia entre extremos
-    components = 21.5188       # numero de componentes
-    max_component = 19.7512      # cardinalidad de componente más grande
-    threats = 120.2703      # celdas amenazadas
-    territory = 73.6211     # dominio general sobre el tablero
-    ctrl_board = 31.5804      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    distance = 1       # distancia entre extremos
+    components = 1     # numero de componentes
+    max_component = 1  # cardinalidad de componente más grande
+    threats = 1        # celdas amenazadas
+    territory = 1      # dominio general sobre el tablero
+    ctrl_board = 45    # factor de control territorial (celdas cercanas al centro o bordes relevantes)
     
     @staticmethod
     def set_weights(*weights, graph: Optional["HexGraph"] = None) -> None:
@@ -508,12 +508,19 @@ class Minimax:
             [256.2148, 87.1538, 58.8399, 97.8713, 41.2106, 30.1494],
             [92.0739, 80.7917, 75.5324, 38.1143, 5.2127, 86.243],
             [85.8652, 77.575, 76.7384, 38.1143, 7.1665, 86.243],
-            [54.3206, 117.9748, 92.1444, 81.1457, 13.3394, 65.0]
+            [54.3206, 117.9748, 92.1444, 81.1457, 13.3394, 65.0],
+            [180, 35, 15, 160, 55, 45],          # agresivo threats
+            [140, 40, 25, 110, 80, 40],          # equilibrado clásico
+            [100, 60, 50, 90, 120, 60],          # territorial / clusters grandes
+            [200, 25, 18, 200, 60, 35],          # distancia y amenazas muy fuertes
+            [160, 40, 25, 130, 70, 50],          # buen punto medio 2025-2026
+            [120, 45, 30, 100, 90, 80],          # si ctrl_board es útil en apertura
         ]
 
         # If graph provided and early game (<= 2 moves), pick a random preset.
         if graph.move_counter <= 2:
             weights = random.choice(presets)
+            print(weights)
 
         Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
     
@@ -558,17 +565,17 @@ class Minimax:
         graph.detect_opponent_move(board)  
 
         # Ajustar pesos según el torneo (pasamos el grafo para decidir presets)
-        Minimax.set_weights(92.0739,80.7917,75.5324, 38.1143, 5.2127, 86.243, graph=graph)
+        Minimax.set_weights(16.9283, 2.8124, 5.1506, 16.7625, 1, 3.4640, graph=graph)
         
         size = graph.size
         
         if size <= 3:
             profundidad = 11
         elif 4 <= size <= 5:
-            profundidad = 3
+            profundidad = 5
         elif 6 <= size <= 7:
             profundidad = 3
-            
+
         _, best_move = Minimax.minimax(
             turno=0,
             profundidad=profundidad,
