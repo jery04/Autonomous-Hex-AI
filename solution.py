@@ -59,6 +59,8 @@ class HexGraph:
         self.player = player_id
         self.matrix: List[List[Node]] = []
         self.free_cells: Set[Tuple[int, int]] = set()
+        self.player_cells: Set[Tuple[int, int]] = set()
+        self.opp_cells: Set[Tuple[int, int]] = set()
         self.node_left: Optional[Node] = None
         self.node_right: Optional[Node] = None
         self.node_up: Optional[Node] = None
@@ -179,6 +181,12 @@ class HexGraph:
             # Solo decrementar contador si antes estaba marcado.
             if node.marked != 0:
                 self.move_counter -= 1
+                # Quitar de los sets correspondientes
+                if node.marked == self.player:
+                    self.player_cells.discard((r, c))
+                elif node.marked == self.opp:
+                    self.opp_cells.discard((r, c))
+
             node.marked = 0
             # Añadir a free_cells
             self.free_cells.add((r, c))
@@ -188,6 +196,11 @@ class HexGraph:
             self.move_counter += 1
             self.free_cells.discard((r, c))
             node.marked = player_id
+            # Añadir a los sets correspondientes
+            if player_id == self.player:
+                self.player_cells.add((r, c))
+            elif player_id == self.opp:
+                self.opp_cells.add((r, c))
         
     def territorial_control(self, r: int, c: int, player: int = None) -> float:
         """
@@ -321,51 +334,54 @@ class HexGraph:
         components = 0
         max_card = 0
 
-        for r in range(n):
-            row = matrix[r]
-            row_base = r * n
-            for c in range(n):
-                idx = row_base + c
-                if visited[idx]:
-                    continue
+        # Seleccionar el conjunto de coordenadas a iterar según el jugador
+        if player == self.player:
+            coords_iter = self.player_cells
+        else:
+            coords_iter = self.opp_cells
 
-                start = row[c]
-                if start.marked != player:
-                    continue
+        for r, c in coords_iter:
+            idx = r * n + c
+            if visited[idx]:
+                continue
 
-                # Nueva componente: DFS
-                components += 1
-                comp_id = components
-                stack = [(r, c)]
-                visited[idx] = 1
-                start.id_comp = comp_id
-                card = 0
+            start = matrix[r][c]
+            if start.marked != player:
+                continue
 
-                while stack:
-                    cr, cc = stack.pop()
-                    node = matrix[cr][cc]
-                    card += 1
+            # Nueva componente: DFS
+            components += 1
+            comp_id = components
+            stack = [(r, c)]
+            visited[idx] = 1
+            start.id_comp = comp_id
+            card = 0
 
-                    for neigh in node.neighbors:
-                        nr, nc = neigh.r, neigh.c
-                        # Ignorar extremos (coordenadas negativas)
-                        if not (0 <= nr < n and 0 <= nc < n):
-                            continue
+            while stack:
+                cr, cc = stack.pop()
+                node = matrix[cr][cc]
+                card += 1
 
-                        nidx = nr * n + nc
-                        if visited[nidx]:
-                            continue
+                for neigh in node.neighbors:
+                    nr, nc = neigh.r, neigh.c
+                    # Ignorar extremos (coordenadas negativas)
+                    if not (0 <= nr < n and 0 <= nc < n):
+                        continue
 
-                        neigh_node = matrix[nr][nc]
-                        if neigh_node.marked != player:
-                            continue
+                    nidx = nr * n + nc
+                    if visited[nidx]:
+                        continue
 
-                        visited[nidx] = 1
-                        neigh_node.id_comp = comp_id
-                        stack.append((nr, nc))
+                    neigh_node = matrix[nr][nc]
+                    if neigh_node.marked != player:
+                        continue
 
-                if card > max_card:
-                    max_card = card
+                    visited[nidx] = 1
+                    neigh_node.id_comp = comp_id
+                    stack.append((nr, nc))
+
+            if card > max_card:
+                max_card = card
 
         return components, max_card
 
