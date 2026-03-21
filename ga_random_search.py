@@ -9,14 +9,14 @@ from board import HexBoard
 Vector = List[float]
 
 # Opponent center vector: opponents will be sampled in a neighbourhood around this
-OPPONENT_CENTER = [120.0, 10.0, 18.0, 60.0, 35.0, 28.0]
+OPPONENT_CENTER = [92.0739,80.7917,75.5324, 38.1143, 5.2127, 86.243]
 RANGES = [
-    (80.0, 220.0),  # a
-    (4.0, 35.0),    # b
-    (8.0, 50.0),    # c
-    (30.0, 140.0),  # d
-    (15.0, 90.0),   # e
-    (18.0, 42.0),   # f
+    (50.0,  350.0),   # a  → distancia (el rey absoluto, casi siempre el más alto)
+    (5.0,   120.0),   # b  → comp_opp - comp_self (penaliza fragmentación)
+    (5.0,   100.0),   # c  → max_comp_self - max_comp_opp (premia cadenas largas)
+    (10.0,  250.0),   # d  → threats_opp - threats_self (amenazas suelen ser críticas)
+    (0.0,   80.0),    # e  → dom_self - dom_opp (dominio territorial, suele pesar menos)
+    (3.0, 65.0),      # f
 ]
 
 def neighbor_vector(center: Vector, delta: float = 10.0) -> Vector:
@@ -44,10 +44,12 @@ def set_weights(weights: Vector) -> None:
     Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
 
 def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
-    """Play one game and return (winner id, winner_move_count, avg_seconds_per_move)
+    """Play one game and return (winner id, winner_move_count, avg_seconds_per_move,
+    max_move_time_p1, max_move_time_p2)
 
     Time is tracked per player and the function returns the average seconds
-    per move for the winner. For draws or aborted games returns (0,0,0).
+    per move for the winner plus the maximum single-move time observed for
+    each player. For draws or aborted games returns (0,0,0,0.0,0.0).
     """
     board = HexBoard(size)
     g1 = HexGraph(size=size, player_id=1)
@@ -58,6 +60,9 @@ def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
     # cumulative time spent by each player thinking (seconds)
     cum_time_p1 = 0.0
     cum_time_p2 = 0.0
+    # maximum single-move time observed for each player
+    max_move_time_p1 = 0.0
+    max_move_time_p2 = 0.0
 
     for _ in range(max_moves):
         move_t0 = time.time()
@@ -74,11 +79,13 @@ def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
         # accumulate thinking time for the player who just moved
         if pid == 1:
             cum_time_p1 += move_time
+            max_move_time_p1 = max(max_move_time_p1, move_time)
         else:
             cum_time_p2 += move_time
+            max_move_time_p2 = max(max_move_time_p2, move_time)
 
         if move is None:
-            return 0, 0, 0.0
+            return 0, 0, 0.0, max_move_time_p1, max_move_time_p2
 
         r, c = move
         if not board.place_piece(r, c, pid):
@@ -88,7 +95,7 @@ def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
                 winner_avg_time = (cum_time_p1 / winner_moves) if winner_pid == 1 else (cum_time_p2 / winner_moves)
             else:
                 winner_avg_time = 0.0
-            return winner_pid, winner_moves, winner_avg_time
+            return winner_pid, winner_moves, winner_avg_time, max_move_time_p1, max_move_time_p2
 
         if board.check_connection(pid):
             winner_moves = g1.move_counter if pid == 1 else g2.move_counter
@@ -96,18 +103,19 @@ def play_match(size: int, w1: Vector, w2: Vector) -> tuple:
                 winner_avg_time = (cum_time_p1 / winner_moves) if pid == 1 else (cum_time_p2 / winner_moves)
             else:
                 winner_avg_time = 0.0
-            return pid, winner_moves, winner_avg_time
+            return pid, winner_moves, winner_avg_time, max_move_time_p1, max_move_time_p2
 
         turn = 1 - turn
 
     # draw
-    return 0, 0, 0.0
+    return 0, 0, 0.0, max_move_time_p1, max_move_time_p2
 
 def fitness(
     individuo: Vector,
     n_games: int = 24,
     move_weight: float = 0.5,
     time_weight: float = 0.5,
+    board_sizes: List[int] = [4, 5],
 ) -> float:
     """Return score (%) vs opponents on 4x4 and 5x5.
 
@@ -122,12 +130,17 @@ def fitness(
     for game_idx in range(n_games):
         # opponent sampled in a neighbourhood around OPPONENT_CENTER
         opponent = random_vector()
-        size = 3 if game_idx % 2 == 0 else 3
+        # choose a board size for this game from the provided list
+        size = random.choice(board_sizes)
         max_moves = size * size
 
         # Randomize who starts to reduce first-move bias.
+        move_time_threshold = 4.7
         if random.random() < 0.5:
-            winner, winner_moves, winner_time = play_match(size, individuo, opponent)
+            winner, winner_moves, winner_time, max_p1, max_p2 = play_match(size, individuo, opponent)
+            # If the individuo (player 1) made any move > threshold, give very bad score
+            if max_p1 > move_time_threshold:
+                return 0.0
             if winner == 1:
                 wins += 1
                 move_speed_bonus_sum += (max_moves - winner_moves) / max_moves
@@ -135,7 +148,10 @@ def fitness(
                 max_time = 0.05
                 time_speed_bonus_sum += max(0.0, (max_time - winner_time) / max_time)
         else:
-            winner, winner_moves, winner_time = play_match(size, opponent, individuo)
+            winner, winner_moves, winner_time, max_p1, max_p2 = play_match(size, opponent, individuo)
+            # If the individuo (player 2) made any move > threshold, give very bad score
+            if max_p2 > move_time_threshold:
+                return 0.0
             if winner == 2:
                 wins += 1
                 move_speed_bonus_sum += (max_moves - winner_moves) / max_moves
@@ -152,11 +168,13 @@ def fitness(
         + move_weight * avg_move_speed_bonus * 100.0
         + time_weight * avg_time_speed_bonus * 100.0
     )
+    # Ensure score is a percentage in [0,100]
+    final_score = max(0.0, min(100.0, final_score))
     #print(individuo,f"score={final_score:.2f}% (wins={wins}/{n_games}",)
     return final_score
 
 def init_population(pop_size: int) -> List[List[float]]:
-    return [random_vector() for _ in range(pop_size)]
+    return [neighbor_vector(OPPONENT_CENTER, 50) for _ in range(pop_size)]
 
 def tournament_selection(pop: List[Vector], fitnesses: List[float], k: int = 3) -> Vector:
     selected = random.sample(range(len(pop)), k)
@@ -180,12 +198,13 @@ def mutate(ind: Vector, pm: float, sigma: float = 6.0) -> None:
 
 def ga_optimize(
     pop_size: int = 160,
-    generations: int = 25,
+    generations: int = 20,
     pc: float = 0.75,
     pm: float = 0.18,
     seed: int = None,
     top_frac: float = 0.05,
     n_games: int = 24,
+    board_sizes: List[int] = [3],
 ):
     if seed is not None:
         random.seed(seed)
@@ -199,7 +218,8 @@ def ga_optimize(
         gen_t0 = time.time()
         # Parallelize fitness evaluation across available CPU cores
         with Pool(processes=min(cpu_count(), len(pop))) as pool:
-            fitnesses = pool.starmap(fitness, [(ind, n_games) for ind in pop])
+            # pass board_sizes into fitness so evaluation uses selected board sizes
+            fitnesses = pool.starmap(fitness, [(ind, n_games, 0.5, 0.5, board_sizes) for ind in pop])
 
         ranked = sorted(range(len(pop)), key=lambda i: fitnesses[i], reverse=True)
 
@@ -246,15 +266,24 @@ def ga_optimize(
 def main():
     parser = argparse.ArgumentParser(description="GA tuner for Minimax weights (a..f) based on match win rate")
     parser.add_argument("--pop", type=int, default=160)
-    parser.add_argument("--gen", type=int, default=25)
+    parser.add_argument("--gen", type=int, default=15)
     parser.add_argument("--pc", type=float, default=0.75)
     parser.add_argument("--pm", type=float, default=0.18)
-    parser.add_argument("--n_games", type=int, default=24)
+    parser.add_argument("--n_games", type=int, default=21)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--sizes",
+        type=str,
+        default="3",
+        help="Comma-separated list of board sizes to evaluate, e.g. 3",
+    )
     args = parser.parse_args()
 
     t0 = time.time()
     print("Iniciando optimización GA...")
+    # parse sizes argument into a list of ints
+    sizes = [int(s) for s in args.sizes.split(",") if s.strip()]
+
     best_overall, best_fit, last_best, last_fit = ga_optimize(
         pop_size=args.pop,
         generations=args.gen,
@@ -263,6 +292,7 @@ def main():
         seed=args.seed,
         n_games=args.n_games,
         top_frac=0.05,
+        board_sizes=sizes,
     )
     elapsed = time.time() - t0
     print(f"Optimización completada en {elapsed:.2f}s")

@@ -492,21 +492,29 @@ class Minimax:
     ctrl_board = 31.5804      # factor de control territorial (celdas cercanas al centro o bordes relevantes)
     
     @staticmethod
-    def set_weights(*weights) -> None:
+    def set_weights(*weights, graph: Optional["HexGraph"] = None) -> None:
         """
-        Set weights for the heuristic. Accepts either a single iterable
-        (list/tuple) of six numbers or six numeric positional arguments.
+        Set weights for the heuristic.
+
+        Behavior:
+        - If `graph` is provided and `graph.move_counter <= 2`, chooses a
+          random preset from three predefined weight vectors.
+        - Otherwise uses the weights passed as positional args (either six
+          separate numbers or a single iterable of six numbers).
         """
-        # Unpack if a single iterable was passed
-        if len(weights) == 1 and isinstance(weights[0], (list, tuple)):
-            vals = list(weights[0])
-        else:
-            vals = list(weights)
+        presets = [
+            [164.8978, 7.6193, 31.2489, 89.6845, 66.9143, 27.9527],
+            [246.6303, 69.2294, 76.1603, 172.2293, 49.068, 20.2236],
+            [256.2148, 87.1538, 58.8399, 97.8713, 41.2106, 30.1494],
+            [92.0739, 80.7917, 75.5324, 38.1143, 5.2127, 86.243],
+            [85.8652, 77.575, 76.7384, 38.1143, 7.1665, 86.243],
+        ]
 
-        if len(vals) != 6:
-            raise ValueError("set_weights expects 6 weight values")
+        # If graph provided and early game (<= 2 moves), pick a random preset.
+        if graph.move_counter <= 2:
+            weights = random.choice(presets)
 
-        Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = vals
+        Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
     
     @staticmethod
     def calculate_heuristic(graph: HexGraph, free_node: Optional[Iterable[Tuple[int, int]]] = None) -> Optional[int]:
@@ -544,27 +552,22 @@ class Minimax:
         - 6 <= size <=7 -> profundidad 3
         - por defecto -> profundidad 3
         """
-        
+
         # Sincronizar grafos con el tablero actual
         graph.detect_opponent_move(board)  
 
-        size = getattr(graph, "size", None)
+        # Ajustar pesos según el torneo (pasamos el grafo para decidir presets)
+        Minimax.set_weights(92.0739,80.7917,75.5324, 38.1143, 5.2127, 86.243, graph=graph)
+        
+        size = graph.size
         
         if size <= 3:
             profundidad = 11
-            #a = 1, b=2, c=3, d=4, e=5, f=6
         elif 4 <= size <= 5:
             profundidad = 5
-            #164.8978, 7.6193, 31.2489, 89.6845, 66.9143, 27.9527
-            #169.5289, 4.0, 30.9841, 78.4032, 86.1154, 30.2524
-            #130.9652, 21.5188, 19.7512, 120.2703, 73.6211, 31.5804
-            #125.7379, 19.3651, 16.104, 114.8725, 72.9301, 33.5532
-            Minimax.set_weights(169.5289, 4.0, 30.9841, 78.4032, 86.1154, 30.2524)
         elif 6 <= size <= 7:
             profundidad = 3
-            #a = 1, b=2, c=3, d=4, e=5, f=6
             
-
         _, best_move = Minimax.minimax(
             turno=0,
             profundidad=profundidad,
