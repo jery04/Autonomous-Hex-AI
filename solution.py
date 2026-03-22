@@ -5,6 +5,7 @@ import sys
 import math
 import random
 import statistics
+from mcts import MCTS
 
 
 class SmartPlayer(Player):
@@ -30,7 +31,7 @@ class SmartPlayer(Player):
             # Usar preminimax para elegir profundidad según tamaño
             return Minimax.preminimax(self.graph, board)
         else:
-            print("Soon...")
+            return MCTS.best_move(board, self.player_id)
         
         # Algo raro
         return (-1, -1)
@@ -479,6 +480,46 @@ class HexGraph:
 
         return threatened
 
+    def get_ordered_moves(self) -> Set[Tuple[int, int]]:
+        """
+        Prioriza:
+        1. Casillas adyacentes a fichas ya colocadas (propias o del rival)
+        2. Casillas cercanas al centro
+        """
+        size = self.size
+        center_r, center_c = size // 2, size // 2
+        max_dist = 2 * (size - 1)
+
+        candidates_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
+        others_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
+
+        for (r, c) in self.free_cells:
+
+            is_adjacent = False
+            for nr, nc in self._neighbors(r, c):
+                if 0 <= nr < size and 0 <= nc < size:
+                    if self.matrix[nr][nc].marked != 0:
+                        is_adjacent = True
+                        break
+
+            dist_center = abs(r - center_r) + abs(c - center_c)
+
+            if is_adjacent:
+                candidates_by_dist[dist_center].append((r, c))
+            else:
+                others_by_dist[dist_center].append((r, c))
+
+        ordered_moves: list[tuple[int, int]] = []
+
+        for dist in range(max_dist + 1):
+            ordered_moves.extend(candidates_by_dist[dist])
+
+        for dist in range(max_dist + 1):
+            ordered_moves.extend(others_by_dist[dist])
+
+        # Primero todos los que tocan algo, luego el resto.
+        return set(ordered_moves)
+
 class Minimax:
     """
     Contiene la heurística y el algoritmo minimax como métodos estáticos.
@@ -605,47 +646,6 @@ class Minimax:
         return None
 
     @staticmethod
-    def get_ordered_moves(graph: HexGraph) -> Set[Tuple[int, int]]:
-        """
-        Prioriza:
-        1. Casillas adyacentes a fichas ya colocadas (propias o del rival)
-        2. Casillas cercanas al centro
-        """
-        size = graph.size
-        center_r, center_c = size // 2, size // 2
-        max_dist = 2 * (size - 1)
-
-        candidates_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
-        others_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
-
-        for (r, c) in graph.free_cells:
-
-            is_adjacent = False
-            for nr, nc in graph._neighbors(r, c):
-                if 0 <= nr < size and 0 <= nc < size:
-                    if graph.matrix[nr][nc].marked != 0:
-                        is_adjacent = True
-                        break
-
-            dist_center = abs(r - center_r) + abs(c - center_c)
-
-            if is_adjacent:
-                candidates_by_dist[dist_center].append((r, c))
-            else:
-                others_by_dist[dist_center].append((r, c))
-
-        ordered_moves: list[tuple[int, int]] = []
-
-        for dist in range(max_dist + 1):
-            ordered_moves.extend(candidates_by_dist[dist])
-
-        for dist in range(max_dist + 1):
-            ordered_moves.extend(others_by_dist[dist])
-
-        # Primero todos los que tocan algo, luego el resto.
-        return set(ordered_moves)
-
-    @staticmethod
     def minimax(
         turno: int,
         profundidad: int,
@@ -659,7 +659,7 @@ class Minimax:
         Minimax. Retorna (valor, mejor_jugada, promedio_de_hijos_directos).
         """
         if moves is None:
-            moves = Minimax.get_ordered_moves(graph)
+            moves = graph.get_ordered_moves()
             
         if turno >= profundidad-1 or not moves:
             val = Minimax.calculate_heuristic(graph, moves)

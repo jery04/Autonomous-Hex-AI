@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
 from math import cos, radians, sin, sqrt
-
 from board import HexBoard
 from solution import SmartPlayer
 import time
@@ -322,7 +321,7 @@ class HexGUI:
 		self.root.mainloop()
 
 def main() -> None:
-	app = HexGUI(size=5)
+	app = HexGUI(size=9)
 	app.run()
 
 if __name__ == "__main__":
