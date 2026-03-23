@@ -12,7 +12,7 @@ class SmartPlayer(Player):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.graph: Optional[HexGraph] = None
-        self.mcts = MCTS()
+        self.mcts = Optional[MCTS] = None
 
     def is_different_board(self, board: HexBoard, sample_size: int = 3) -> bool:
         """
@@ -39,34 +39,28 @@ class SmartPlayer(Player):
 
         return False
 
-    def update_graphs(self, board: HexBoard) -> None:
-        """
-        Crea lel grarfo si no existe y detecta la última jugada del oponente
-        """
-        # Reuse existing graphs if present; create them if not.
-        if self.graph is not None and self.is_different_board(board):
-            self.graph = None
-        
-        if self.graph is None:
-            self.graph = HexGraph(size=board.size, player_id=self.player_id)
-        
     def play(self, board: HexBoard) -> tuple:
 
-        best_move = None
         if board.size <= 8:
-            self.mcts.reset()
+            # Resetear MCTS
+            self.mcts = None
+            
             # Sincronizar y actualizar grafos a partir del tablero
-            self.update_graphs(board) 
+            if self.graph is None or self.is_different_board(board):
+                self.graph = HexGraph(size=board.size, player_id=self.player_id)
                 
             # Usar preminimax para elegir profundidad según tamaño
             return Minimax.preminimax(self.graph, board)
         else:
-            self.mcts.sync_after_opponent_move(board.board, self.player_id)
+            # Resetear HexGraph
+            self.graph = None 
+            
+            # Sincronizar y actualizar MCTS a partir del tablero
+            if self.mcts is None or self.mcts.is_different_board(board):
+                self.mcts = MCTS(size=board.size, player_id=self.player_id)
+            
+            return self.mcts.best_move(board)
 
-            best_move = self.mcts.best_move(board, self.player_id)
-            if best_move is None:
-                return (-1, -1)
-            return best_move
         
         # Algo raro
         return (-1, -1)
