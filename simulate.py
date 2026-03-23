@@ -18,6 +18,8 @@ class HexGUI:
 		self.ai_moves: list[tuple[int, int]] = []
 		# tiempos de ejecución de self.smart_player.play en segundos
 		self.play_times: list[float] = []
+		# tiempos por jugada en orden (None para jugadas humanas no temporizadas)
+		self.move_times: list[float | None] = []
 		self.game_over = False
 
 		self.hex_radius = 28
@@ -247,6 +249,8 @@ class HexGUI:
 			return
 
 		self.human_moves.append((r, c))
+		# registrar jugada humana como no temporizada
+		self.move_times.append(None)
 		self.redraw_board()
 		self.refresh_moves_list()
 
@@ -269,6 +273,8 @@ class HexGUI:
 		ai_r, ai_c = self.smart_player.play(self.board)
 		duration = time.perf_counter() - start
 		self.play_times.append(duration)
+		# registrar tiempo de la jugada de la IA en la secuencia de jugadas
+		self.move_times.append(duration)
 		placed = self.board.place_piece(ai_r, ai_c, self.ai_id)
 		if not placed:
 			self.game_over = True
@@ -299,6 +305,7 @@ class HexGUI:
 		self.human_moves.clear()
 		self.ai_moves.clear()
 		self.play_times.clear()
+		self.move_times.clear()
 		self.game_over = False
 		self.status_label.config(text="Tu turno: haz click en una casilla vacia")
 		self.redraw_board()
@@ -314,6 +321,13 @@ class HexGUI:
 			max_t = max(self.play_times)
 		# imprimir en consola
 		print(f"IA play() promedio: {avg:.6f}s, máximo: {max_t:.6f}s")
+		# Imprimir solo los tiempos de la IA en orden (desde la primera jugada de IA hasta la última)
+		if self.move_times:
+			ai_times = [t for t in self.move_times if t is not None]
+			if ai_times:
+				print("Tiempos de la IA (orden):")
+				for i, t in enumerate(ai_times, start=1):
+					print(f"IA {i:>2}: {t:.6f}s")
 		# actualizar label visual
 		self.timing_label.config(text=f"Promedio: {avg:.4f}s   Máximo: {max_t:.4f}s")
 
@@ -321,7 +335,7 @@ class HexGUI:
 		self.root.mainloop()
 
 def main() -> None:
-	app = HexGUI(size=9)
+	app = HexGUI(size=5)
 	app.run()
 
 if __name__ == "__main__":
