@@ -657,7 +657,7 @@ class Minimax:
             profundidad = 11
         elif 4 <= size <= 5:
             profundidad = 5
-        elif 6 <= size <= 12:
+        elif 6 <= size <= 11:
             profundidad = 3
 
         _, best_move = Minimax.minimax(
