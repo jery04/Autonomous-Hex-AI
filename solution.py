@@ -14,39 +14,14 @@ class SmartPlayer(Player):
         self.graph: Optional[HexGraph] = None
         self.mcts = Optional[MCTS] = None
 
-    def is_different_board(self, board: HexBoard, sample_size: int = 3) -> bool:
-        """
-        Select up to `sample_size` random cells from the union of
-        `player_cells` and `opp_cells`. If at least one of the selected
-        cells is free on `board` (i.e. `board.board[r][c] == 0`) return True.
-
-        Returns False if there are no candidate cells or none of the sampled
-        cells are free.
-        """
-        if board.size != self.graph.size:
-            return True
-        
-        # Combine player's and opponent's cells
-        candidates = list(self.graph.player_cells | self.graph.opp_cells)
-        if not candidates:
-            return False
-
-        sampled = random.sample(candidates, min(sample_size, len(candidates)))
-
-        for (r, c) in sampled:
-            if board.board[r][c] == 0:
-                return True
-
-        return False
-
     def play(self, board: HexBoard) -> tuple:
 
-        if board.size <= 8:
+        if board.size <= 11:
             # Resetear MCTS
             self.mcts = None
             
             # Sincronizar y actualizar grafos a partir del tablero
-            if self.graph is None or self.is_different_board(board):
+            if self.graph is None or self.graph.is_different_board(board):
                 self.graph = HexGraph(size=board.size, player_id=self.player_id)
                 
             # Usar preminimax para elegir profundidad según tamaño
@@ -111,6 +86,31 @@ class HexGraph:
                 return None
             
         return None
+
+    def is_different_board(self, board: HexBoard, sample_size: int = 3) -> bool:
+        """
+        Select up to `sample_size` random cells from the union of
+        `player_cells` and `opp_cells`. If at least one of the selected
+        cells is free on `board` (i.e. `board.board[r][c] == 0`) return True.
+
+        Returns False if there are no candidate cells or none of the sampled
+        cells are free.
+        """
+        if board.size != self.size:
+            return True
+        
+        # Combine player's and opponent's cells
+        candidates = list(self.player_cells | self.opp_cells)
+        if not candidates:
+            return False
+
+        sampled = random.sample(candidates, min(sample_size, len(candidates)))
+
+        for (r, c) in sampled:
+            if board.board[r][c] == 0:
+                return True
+
+        return False
 
     def is_cell_available(self, r: int, c: int) -> bool:
         """

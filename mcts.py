@@ -96,6 +96,24 @@ class MCTS:
     def _new_root(player_just_moved: int) -> MCTSNode:
         return MCTSNode(move=None, parent=None, player_just_moved=player_just_moved)
 
+    def _sync_state_from_board(self, board: HexBoard) -> None:
+        self._last_size = board.size
+        self._last_my_cells = set()
+        self._last_opp_cells = set()
+        self._last_free_cells = set()
+
+        for r in range(board.size):
+            for c in range(board.size):
+                value = board.board[r][c]
+                if value == 0:
+                    self._last_free_cells.add((r, c))
+                elif value == self.player:
+                    self._last_my_cells.add((r, c))
+                elif value == self.opp:
+                    self._last_opp_cells.add((r, c))
+
+        self._dsu_cache.clear()
+
     def _commit_my_move(self, move: Tuple[int, int]) -> Tuple[int, int]:
         self._last_my_cells.add(move)
         #self._last_opp_cells.discard(move)
@@ -112,17 +130,10 @@ class MCTS:
 
         sampled = random.sample(candidates, min(sample_size, len(candidates)))
         return any(board.board[r][c] == 0 for (r, c) in sampled)
-
-    def detect_opponent_move(self, board: HexBoard) -> None:
-        for r,c in self._last_free_cells:
-            if board.board[r][c] != 0:
-                self._last_free_cells.discard((r, c))
-                self._last_opp_cells.add((r,c))
-                return
-
+    
     def _neighbors(self, r: int, c: int) -> List[Tuple[int, int]]:
         size = self._last_size
-        deltas = [(-1, -1), (-1, 0), (0, 1), (1, 0), (1, -1), (0, -1)] if r % 2 else [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (0, -1)]
+        deltas = [(-1, -1), (-1, 0), (0, 1), (1, 0), (1, -1), (0, -1)] if r % 2 != 0 else [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (0, -1)]
         candidates = [(r + dr, c + dc) for dr, dc in deltas]
         return [(nr, nc) for nr, nc in candidates if 0 <= nr < size and 0 <= nc < size]
 
@@ -205,7 +216,6 @@ class MCTS:
         played_moves: List[Tuple[int, int]],
     ) -> int:
         available = self._ordered_moves()
-        #random.shuffle(available)
 
         current = player_to_move
         for r, c in available:
@@ -218,25 +228,20 @@ class MCTS:
         return self._other(player_to_move)
 
     def best_move(self, board: HexBoard) -> Optional[Tuple[int, int]]:
-        #self.player = root_player
-        #self.opp = self._other(root_player)
 
-        #if self.is_different_board(board) or not self._last_my_cells and not self._last_opp_cells:
-        #    self._sync_tracked_sets(board, root_player)
-
-        self.detect_opponent_move(board)
+        self._sync_state_from_board(board)
 
         if not self._last_free_cells:
             return None
 
-        if self.root is None:
-            self.root = self._new_root(self.opp)
-            self.root_player = self.player
+        # Rebuild the search tree from the current legal position to avoid stale branches.
+        self.root = self._new_root(self.opp)
+        self.root_player = self.player
 
         root = self.root
         sim_board = [row[:] for row in board.board]
 
-        time_limit = 3.75
+        time_limit = 3.5
         start_time = time.perf_counter()
 
         while time.perf_counter() - start_time < time_limit:
@@ -288,8 +293,19 @@ class MCTS:
             move = random.choice(tuple(self._last_free_cells))
             return self._commit_my_move(move)
 
-        best_child = max(root.children, key=lambda child: child.visits)
+        legal_children = [
+            child
+            for child in root.children
+            if child.move in self._last_free_cells and board.board[child.move[0]][child.move[1]] == 0
+        ]
+
+        if not legal_children:
+            move = random.choice(tuple(self._last_free_cells))
+            return self._commit_my_move(move)
+
+        best_child = max(legal_children, key=lambda child: child.visits)
         self.root = best_child
         self.root.parent = None
         self.root_player = self.opp
+        
         return self._commit_my_move(best_child.move)
