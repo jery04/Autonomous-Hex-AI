@@ -12,6 +12,7 @@ class SmartPlayer(Player):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.graph: Optional[HexGraph] = None
+        self.mcts = MCTS()
 
     def is_different_board(self, board: HexBoard, sample_size: int = 3) -> bool:
         """
@@ -53,13 +54,19 @@ class SmartPlayer(Player):
 
         best_move = None
         if board.size <= 8:
+            self.mcts.reset()
             # Sincronizar y actualizar grafos a partir del tablero
             self.update_graphs(board) 
                 
             # Usar preminimax para elegir profundidad según tamaño
             return Minimax.preminimax(self.graph, board)
         else:
-            return MCTS.best_move(board, self.player_id)
+            self.mcts.sync_after_opponent_move(board.board, self.player_id)
+
+            best_move = self.mcts.best_move(board, self.player_id)
+            if best_move is None:
+                return (-1, -1)
+            return best_move
         
         # Algo raro
         return (-1, -1)
@@ -656,7 +663,7 @@ class Minimax:
             profundidad = 11
         elif 4 <= size <= 5:
             profundidad = 5
-        elif 6 <= size <= 8:
+        elif 6 <= size <= 12:
             profundidad = 3
 
         _, best_move = Minimax.minimax(

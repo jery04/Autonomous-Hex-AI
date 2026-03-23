@@ -1,6 +1,33 @@
-from typing import Any, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 import math
 import random
+import time
+from board import HexBoard
+
+
+class DisjointSet:
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+        self.rank = [0] * n
+
+    def find(self, x: int) -> int:
+        # Path compression
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
+
+    def union(self, a: int, b: int) -> None:
+        ra = self.find(a)
+        rb = self.find(b)
+        if ra == rb:
+            return
+        # Union by rank
+        if self.rank[ra] < self.rank[rb]:
+            self.parent[ra] = rb
+        else:
+            self.parent[rb] = ra
+            if self.rank[ra] == self.rank[rb]:
+                self.rank[ra] += 1
 
 class MCTSNode:
     def __init__(
@@ -43,98 +70,176 @@ class MCTSNode:
 
 class MCTS:
     # Presupuesto razonable para GUI; escalar por tamaño de tablero.
-    base_iterations = 900
     exploration = 1.41421356237
+
+    def __init__(self) -> None:
+        self.root: Optional[MCTSNode] = None
+        self.root_player: Optional[int] = None
+        self.player: Optional[int] = None
+        self.opp: Optional[int] = None
+        self._last_my_cells: Optional[Set[Tuple[int, int]]] = None
+        self._last_opp_cells: Optional[Set[Tuple[int, int]]] = None
+        self._last_free_cells: Optional[Set[Tuple[int, int]]] = None
+        self._last_size: Optional[int] = None
+        self._dsu_cache: dict = {}
 
     @staticmethod
     def _other(player_id: int) -> int:
-        return 2 if player_id == 1 else 1
+        return 3 - player_id
 
     @staticmethod
-    def _neighbors(size: int, r: int, c: int) -> List[Tuple[int, int]]:
-        # Vecinos en un tablero hexagonal (coordenadas offset even-r).
-        if r % 2 != 0:
-            candidates = [
-                (r - 1, c - 1),    # arriba-izquierda   NW
-                (r - 1, c    ),    # arriba-derecha     NE
-                (r    , c + 1),    # derecha            E
-                (r + 1, c    ),    # abajo-derecha      SE
-                (r + 1, c - 1),    # abajo-izquierda    SW
-                (r    , c - 1),    # izquierda          W
-            ]
+    def _new_root(player_just_moved: int) -> MCTSNode:
+        return MCTSNode(move=None, parent=None, player_just_moved=player_just_moved)
+
+    def _commit_my_move(self, move: Tuple[int, int], size: int) -> Tuple[int, int]:
+        self._apply_my_move_to_tracked_sets(move)
+        self._last_size = size
+        return move
+
+    def _ensure_untried_moves(self, node: MCTSNode, size: int, free_cells: Set[Tuple[int, int]]) -> None:
+        if node.untried_moves is None:
+            node.untried_moves = self._ordered_moves(size, free_cells)
+
+    def reset(self) -> None:
+        self.root = self.root_player = self.player = self.opp = None
+        self._last_my_cells = self._last_opp_cells = self._last_free_cells = None
+        self._last_size = None
+        self._dsu_cache.clear()
+
+    def _init_tracked_sets_from_board(self, board: List[List[int]], my_player: int) -> None:
+        opp_player = self._other(my_player)
+        size = len(board)
+
+        my_cells: Set[Tuple[int, int]] = set()
+        opp_cells: Set[Tuple[int, int]] = set()
+        free_cells: Set[Tuple[int, int]] = set()
+
+        for r in range(size):
+            for c in range(size):
+                cell = board[r][c]
+                if cell == my_player:
+                    my_cells.add((r, c))
+                elif cell == opp_player:
+                    opp_cells.add((r, c))
+                else:
+                    free_cells.add((r, c))
+
+        self._last_my_cells = my_cells
+        self._last_opp_cells = opp_cells
+        self._last_free_cells = free_cells
+        self._last_size = size
+
+    def _apply_my_move_to_tracked_sets(self, move: Tuple[int, int]) -> None:
+        if None in (self._last_my_cells, self._last_opp_cells, self._last_free_cells):
+            return
+        self._last_my_cells.add(move)
+        self._last_opp_cells.discard(move)
+        self._last_free_cells.discard(move)
+
+    def _detect_new_move(
+        self,
+        previous_free_cells: Set[Tuple[int, int]],
+        current_board: List[List[int]],
+        expected_player: int,
+    ) -> Optional[Tuple[int, int]]:
+        # Recorremos solo celdas que estaban vacias en el turno anterior.
+        detected_move: Optional[Tuple[int, int]] = None
+        for r, c in previous_free_cells:
+            value = current_board[r][c]
+            if value == expected_player:
+                if detected_move is not None:
+                    # Se detectaron mas de una jugada nueva.
+                    return None
+                detected_move = (r, c)
+            elif value != 0:
+                # Estado invalido: una celda antes libre ahora no es del jugador esperado.
+                return None
+
+        return detected_move
+
+    def sync_after_opponent_move(self, board: List[List[int]], player_to_move: int) -> None:
+        self.player = player_to_move
+        self.opp = self._other(player_to_move)
+        # Require previous state to be available to detect the opponent move.
+        if self._last_size is None or self._last_size != len(board):
+            self.reset()
+            return
+
+        if None in (self._last_free_cells, self._last_my_cells, self._last_opp_cells):
+            self.reset()
+            return
+
+        opponent_move = self._detect_new_move(self._last_free_cells, board, self.opp)
+        if opponent_move is None:
+            self.reset()
+            return
+
+        if self.root is not None:
+            child = next((c for c in self.root.children if c.move == opponent_move), None)
+            self.root = child if child is not None else self._new_root(self.opp)
+            if child is not None:
+                self.root.parent = None
         else:
-            candidates = [
-                (r - 1, c    ),    # arriba-izquierda   NW
-                (r - 1, c + 1),    # arriba-derecha     NE
-                (r    , c + 1),    # derecha            E
-                (r + 1, c + 1),    # abajo-derecha      SE
-                (r + 1, c    ),    # abajo-izquierda    SW
-                (r    , c - 1),    # izquierda          W
-            ]
+            self.root = self._new_root(self.opp)
+        self.root_player = player_to_move
+
+        # Update tracked sets and free-cells for future detection.
+        self._last_opp_cells.add(opponent_move)
+        self._last_my_cells.discard(opponent_move)
+        self._last_free_cells.discard(opponent_move)
+
+    def _neighbors(self, size: int, r: int, c: int) -> List[Tuple[int, int]]:
+        # Vecinos en un tablero hexagonal (coordenadas offset even-r).
+        deltas = [(-1, -1), (-1, 0), (0, 1), (1, 0), (1, -1), (0, -1)] if r % 2 else [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (0, -1)]
+        candidates = [(r + dr, c + dc) for dr, dc in deltas]
         return [(nr, nc) for nr, nc in candidates if 0 <= nr < size and 0 <= nc < size]
 
-    @staticmethod
-    def _has_connection(matrix: List[List[int]], player_id: int) -> bool:
+    def _has_connection(self, matrix: List[List[int]], player_id: int) -> bool:
         size = len(matrix)
-        if size == 0:
+        if size == 0 or player_id not in (1, 2):
             return False
 
-        visited = [[False] * size for _ in range(size)]
-        stack: List[Tuple[int, int]] = []
+        # Use cached DSU when available; it will be invalidated on matrix mutations.
+        dsu = self._build_or_get_dsu(matrix, player_id)
 
-        if player_id == 1:
-            for r in range(size):
-                if matrix[r][0] == player_id:
-                    visited[r][0] = True
-                    stack.append((r, 0))
+        def idx(rr: int, cc: int) -> int:
+            return rr * size + cc
 
-            target_col = size - 1
-            while stack:
-                r, c = stack.pop()
-                if c == target_col:
-                    return True
-                for nr, nc in MCTS._neighbors(size, r, c):
-                    if not visited[nr][nc] and matrix[nr][nc] == player_id:
-                        visited[nr][nc] = True
-                        stack.append((nr, nc))
+        starts = [idx(r, 0) for r in range(size) if matrix[r][0] == player_id] if player_id == 1 else [idx(0, c) for c in range(size) if matrix[0][c] == player_id]
+        ends = [idx(r, size - 1) for r in range(size) if matrix[r][size - 1] == player_id] if player_id == 1 else [idx(size - 1, c) for c in range(size) if matrix[size - 1][c] == player_id]
+        if not starts or not ends:
             return False
+        end_roots = {dsu.find(x) for x in ends}
+        return any(dsu.find(x) in end_roots for x in starts)
 
-        if player_id == 2:
-            for c in range(size):
-                if matrix[0][c] == player_id:
-                    visited[0][c] = True
-                    stack.append((0, c))
+    def _ordered_moves(self, size: int, free_cells: Set[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        # Prioriza celdas adyacentes a fichas ya colocadas y luego el resto.
+        occupied: Set[Tuple[int, int]] = set()
+        if self._last_my_cells is not None:
+            occupied |= self._last_my_cells
+        if self._last_opp_cells is not None:
+            occupied |= self._last_opp_cells
 
-            target_row = size - 1
-            while stack:
-                r, c = stack.pop()
-                if r == target_row:
-                    return True
-                for nr, nc in MCTS._neighbors(size, r, c):
-                    if not visited[nr][nc] and matrix[nr][nc] == player_id:
-                        visited[nr][nc] = True
-                        stack.append((nr, nc))
-            return False
+        adjacent_free: Set[Tuple[int, int]] = set()
+        for r, c in occupied:
+            for n in self._neighbors(size, r, c):
+                if n in free_cells:
+                    adjacent_free.add(n)
+        return list(adjacent_free) + list(free_cells - adjacent_free)
 
-        return False
-
-    @staticmethod
-    def _ordered_moves(size: int, free_cells: Set[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        # Prioriza centro para mejorar convergencia al inicio.
-        center = (size - 1) / 2.0
-        return sorted(
-            free_cells,
-            key=lambda rc: (abs(rc[0] - center) + abs(rc[1] - center), rc[0], rc[1]),
-        )
-
-    @staticmethod
     def _mark_at(
+        self,
         matrix: List[List[int]],
         free_cells: Set[Tuple[int, int]],
         r: int,
         c: int,
         player_id: Optional[int],
     ) -> None:
+        # Any mutation of the matrix invalidates cached DSU for that matrix id.
+        matrix_id = id(matrix)
+        self._dsu_cache.pop((matrix_id, 1), None)
+        self._dsu_cache.pop((matrix_id, 2), None)
+
         if player_id is None:
             matrix[r][c] = 0
             free_cells.add((r, c))
@@ -143,17 +248,35 @@ class MCTS:
         matrix[r][c] = player_id
         free_cells.discard((r, c))
 
-    @staticmethod
-    def _init_untried_moves(
-        node: MCTSNode,
-        size: int,
-        free_cells: Set[Tuple[int, int]],
-    ) -> None:
-        if node.untried_moves is None:
-            node.untried_moves = MCTS._ordered_moves(size, free_cells)
+    def _build_or_get_dsu(self, matrix: List[List[int]], player_id: int) -> "DisjointSet":
+        """Return a cached DisjointSet for the given matrix and player if available,
+        otherwise build and cache a new one."""
+        matrix_id = id(matrix)
+        key = (matrix_id, player_id)
+        size = len(matrix)
+        cached = self._dsu_cache.get(key)
+        if cached is not None and cached[1] == size:
+            return cached[0]
 
-    @staticmethod
+        # Build a new DSU for this matrix/player
+        dsu = DisjointSet(size * size)
+
+        def idx(rr: int, cc: int) -> int:
+            return rr * size + cc
+
+        for r in range(size):
+            for c in range(size):
+                if matrix[r][c] != player_id:
+                    continue
+                for nr, nc in self._neighbors(size, r, c):
+                    if matrix[nr][nc] == player_id:
+                        dsu.union(idx(r, c), idx(nr, nc))
+
+        self._dsu_cache[key] = (dsu, size)
+        return dsu
+
     def _rollout(
+        self,
         matrix: List[List[int]],
         size: int,
         free_cells: Set[Tuple[int, int]],
@@ -164,90 +287,99 @@ class MCTS:
         Simulación aleatoria hasta estado terminal.
         Retorna el ganador (1 o 2).
         """
-        available = MCTS._ordered_moves(size, free_cells)
+        available = self._ordered_moves(size, free_cells)
         random.shuffle(available)
 
         current = player_to_move
         for r, c in available:
-            MCTS._mark_at(matrix, free_cells, r, c, current)
+            self._mark_at(matrix, free_cells, r, c, current)
             played_moves.append((r, c))
 
-            if MCTS._has_connection(matrix, current):
+            if self._has_connection(matrix, current):
                 return current
 
-            current = MCTS._other(current)
+            current = self._other(current)
 
         # En Hex no hay empates. Fallback defensivo por consistencia.
-        return MCTS._other(player_to_move)
+        return self._other(player_to_move)
 
-    @staticmethod
-    def _iteration_count(size: int, free_cells: int) -> int:
-        # Menos iteraciones en tableros muy grandes para mantener respuesta fluida.
-        size_factor = max(0.45, 1.15 - 0.035 * (size - 9))
-        fill_factor = 0.6 + 0.4 * (free_cells / (size * size))
-        return max(250, int(MCTS.base_iterations * size_factor * fill_factor))
+    def best_move(self, board: HexBoard, root_player: int) -> Optional[Tuple[int, int]]:
+        if self.player is not None and self.player != root_player:
+            self.reset()
 
-    @staticmethod
-    def best_move(board: Any, root_player: int) -> Optional[Tuple[int, int]]:
+        self.player = root_player
+        self.opp = self._other(root_player)
+
         size = getattr(board, "size", None)
         matrix = getattr(board, "board", None)
         if not isinstance(size, int) or size <= 0 or not isinstance(matrix, list):
             raise ValueError("MCTS.best_move espera un tablero con atributos 'size' y 'board'.")
 
+        if (
+            self._last_size != size
+            or self._last_my_cells is None
+            or self._last_opp_cells is None
+            or self._last_free_cells is None
+        ):
+            # Inicializacion unica (o reinicializacion tras desincronizacion).
+            self._init_tracked_sets_from_board(matrix, root_player)
+
         # Simulación sobre copia local para no mutar el estado real de la partida.
         sim_matrix = [row[:] for row in matrix]
-        free_cells: Set[Tuple[int, int]] = {
-            (r, c)
-            for r in range(size)
-            for c in range(size)
-            if sim_matrix[r][c] == 0
-        }
+        free_cells: Set[Tuple[int, int]] = set(self._last_free_cells)
 
         if not free_cells:
+            self._last_size = size
             return None
 
-        root = MCTSNode(move=None, parent=None, player_just_moved=MCTS._other(root_player))
-        iterations = MCTS._iteration_count(size, len(free_cells))
+        if self.root is None or self.root_player != root_player:
+            self.root = self._new_root(self.opp)
+            self.root_player = root_player
 
-        for _ in range(iterations):
+        root = self.root
+        # Run iterations until time limit is reached (replace fixed iteration count).
+        time_limit = 3.75
+        start_time = time.perf_counter()
+
+        while time.perf_counter() - start_time < time_limit:
             node = root
             current_player = root_player
             played_moves: List[Tuple[int, int]] = []
             winner: Optional[int] = None
 
             # 1) Selection
-            MCTS._init_untried_moves(node, size, free_cells)
+            self._ensure_untried_moves(node, size, free_cells)
             while node.untried_moves == [] and node.children:
                 node = node.uct_select_child(MCTS.exploration)
                 r, c = node.move
-                MCTS._mark_at(sim_matrix, free_cells, r, c, current_player)
+                self._mark_at(sim_matrix, free_cells, r, c, current_player)
                 played_moves.append((r, c))
 
                 # Si este movimiento ya ganó, no necesitamos expandir/simular.
-                if MCTS._has_connection(sim_matrix, current_player):
+                if self._has_connection(sim_matrix, current_player):
                     winner = current_player
                     break
 
-                current_player = MCTS._other(current_player)
-                MCTS._init_untried_moves(node, size, free_cells)
+                current_player = self._other(current_player)
+                self._ensure_untried_moves(node, size, free_cells)
 
             # 2) Expansion
             if winner is None:
-                MCTS._init_untried_moves(node, size, free_cells)
+                self._ensure_untried_moves(node, size, free_cells)
                 if node.untried_moves:
                     move = random.choice(node.untried_moves)
-                    MCTS._mark_at(sim_matrix, free_cells, move[0], move[1], current_player)
+                    self._mark_at(sim_matrix, free_cells, move[0], move[1], current_player)
                     played_moves.append(move)
                     node = node.add_child(move, current_player)
 
-                    if MCTS._has_connection(sim_matrix, current_player):
+                    if self._has_connection(sim_matrix, current_player):
                         winner = current_player
                     else:
-                        current_player = MCTS._other(current_player)
+                        current_player = self._other(current_player)
 
             # 3) Simulation
             if winner is None:
-                winner = MCTS._rollout(sim_matrix, size, free_cells, current_player, played_moves)
+                winner = self._rollout(sim_matrix, size, free_cells, current_player, played_moves)
 
             # 4) Backpropagation
             while node is not None:
@@ -257,11 +389,15 @@ class MCTS:
             # Undo del estado aplicado durante selección/expansión/simulación.
             while played_moves:
                 r, c = played_moves.pop()
-                MCTS._mark_at(sim_matrix, free_cells, r, c, None)
+                self._mark_at(sim_matrix, free_cells, r, c, None)
 
         if not root.children:
-            return random.choice(tuple(free_cells))
+            move = random.choice(tuple(free_cells))
+            return self._commit_my_move(move, size)
 
         # Mejor movimiento final: mayor número de visitas (criterio robusto).
         best_child = max(root.children, key=lambda child: child.visits)
-        return best_child.move
+        self.root = best_child
+        self.root.parent = None
+        self.root_player = self.opp
+        return self._commit_my_move(best_child.move, size)
