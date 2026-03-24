@@ -1,0 +1,10 @@
+# Ignore everything
+/*
+
+# Keep this .gitignore tracked
+!/.gitignore
+
+# Unignore specific files at repo root
+!/estrategia.pdf
+!/solution.py
+!/genetic_algorithm.py

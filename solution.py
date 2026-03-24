@@ -1,12 +1,10 @@
 from player import Player
 from board import HexBoard
 from typing import List, Tuple, Optional, Set, Iterable
-import typing
 import sys
 import math
 import random
 from collections import deque
-#from mcts import MCTS
 import time
 
 # LLamada Principal
@@ -974,7 +972,7 @@ class MCTS:
         root = self.root
         sim_board = [row[:] for row in board.board]
 
-        time_limit = 3.9
+        time_limit = 3.1
         start_time = time.perf_counter()
 
         while time.perf_counter() - start_time < time_limit:
