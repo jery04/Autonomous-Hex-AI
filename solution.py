@@ -1,18 +1,21 @@
 from player import Player
 from board import HexBoard
 from typing import List, Tuple, Optional, Set, Iterable
+import typing
 import sys
 import math
 import random
 from collections import deque
 from mcts import MCTS
+import time
 
-
+# LLamada Principal
+#-----------------------------------------------------------------------
 class SmartPlayer(Player):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.graph: Optional[HexGraph] = None
-        self.mcts = Optional[MCTS] = None
+        self.mcts: Optional[MCTS] = None
 
     def play(self, board: HexBoard) -> tuple:
 
@@ -40,6 +43,8 @@ class SmartPlayer(Player):
         # Algo raro
         return (-1, -1)
 
+# Primary Strategy
+#-----------------------------------------------------------------------
 class Node:
     def __init__(self, r: int, c: int, marked: int = 0):
         self.r = r
@@ -53,10 +58,8 @@ class Node:
 
 class HexGraph:
     """
-    Clase que crea una matriz de `Node` y añade dos nodos extremos.
-    - `create_node_matrix(size, orientation)` crea la matriz y enlaza vecinos.
-    - `orientation` 1 = extremos izquierda-derecha, 2 = extremos arriba-abajo.
-    Los nodos extremos se exponen en `extreme1` y `extreme2`.
+    Clase que crea una matriz de `Node` y añade dos nodos virtuales.
+    conectados a los extremos
     """
 
     def __init__(self, size: int, player_id: int) -> None:
@@ -447,65 +450,21 @@ class HexGraph:
         vecinos hay al menos dos nodos marcados por `player` que pertenezcan
         a componentes conexas distintas (tienen `id_comp` distintos).
         """
-        if not self.matrix:
-            return 0
-
-        if player not in (1, 2):
-            raise ValueError("player must be 1 or 2")
+        # Calcular id_comp sólo para el jugador indicado
 
         matrix = self.matrix
-        n = self.size
-        # Calcular id_comp sólo para el jugador indicado
+        n = self.size  
         
         if comp_done:
             self.count_components(player)
 
         threatened = 0
 
-        # Recorrido completo (hot path): evitar generadores y excepciones.
-        if free_nodes is None:
-            for r in range(n):
-                row = matrix[r]
-                for c in range(n):
-                    node = row[c]
-                    if node.marked != 0:
-                        continue
-
-                    first_comp = None
-                    for neigh in node.neighbors:
-                        nr, nc = neigh.r, neigh.c
-
-                        # Ignorar extremos y cualquier vecino fuera de matriz.
-                        if nr < 0 or nr >= n or nc < 0 or nc >= n:
-                            continue
-
-                        neigh_node = matrix[nr][nc]
-                        if neigh_node.marked != player:
-                            continue
-
-                        comp = neigh_node.id_comp
-                        if comp is None:
-                            continue
-
-                        if first_comp is None:
-                            first_comp = comp
-                        elif comp != first_comp:
-                            threatened += 1
-                            break
-        else:
+        if free_nodes is not None:
             for coords in free_nodes:
-                # Validar entrada de forma barata: se esperan tuplas (r, c).
-                if not isinstance(coords, (tuple, list)) or len(coords) != 2:
-                    continue
-
                 rr, cc = coords
-                if rr < 0 or rr >= n or cc < 0 or cc >= n:
-                    continue
-
                 node = matrix[rr][cc]
-                if node.marked != 0:
-                    continue
-
+                    
                 first_comp = None
                 for neigh in node.neighbors:
                     nr, nc = neigh.r, neigh.c
@@ -529,21 +488,26 @@ class HexGraph:
 
         return threatened
 
-    def get_ordered_moves(self) -> Set[Tuple[int, int]]:
+    def get_ordered_moves(self) -> list[Tuple[int, int]]:
         """
         Prioriza:
         1. Casillas adyacentes a fichas ya colocadas (propias o del rival)
-        2. Casillas cercanas al centro
+        2. Dentro de cada grupo, ordena de mayor a menor según:
+           - `self.matrix_center` si `self.move_counter <= Minimax.ctrl_board`
+           - `self.matrix_edges_self` en caso contrario
+
+        Devuelve una lista ordenada (adjacentes primero, luego las demás).
         """
         size = self.size
-        center_r, center_c = size // 2, size // 2
-        max_dist = 2 * (size - 1)
 
-        candidates_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
-        others_by_dist: list[list[tuple[int, int]]] = [[] for _ in range(max_dist + 1)]
+        # Escoger la matriz de valores a usar según el control del tablero
+        use_center = self.move_counter <= Minimax.ctrl_board
+        key_matrix = self.matrix_center if use_center else self.matrix_edges_self
+
+        adjacent: list[Tuple[int, int]] = []
+        others: list[Tuple[int, int]] = []
 
         for (r, c) in self.free_cells:
-
             is_adjacent = False
             for nr, nc in self._neighbors(r, c):
                 if 0 <= nr < size and 0 <= nc < size:
@@ -551,23 +515,17 @@ class HexGraph:
                         is_adjacent = True
                         break
 
-            dist_center = abs(r - center_r) + abs(c - center_c)
-
             if is_adjacent:
-                candidates_by_dist[dist_center].append((r, c))
+                adjacent.append((r, c))
             else:
-                others_by_dist[dist_center].append((r, c))
+                others.append((r, c))
 
-        ordered_moves: list[tuple[int, int]] = []
+        # Ordenar cada grupo de mayor a menor según la matriz seleccionada
+        adjacent.sort(key=lambda rc: key_matrix[rc[0]][rc[1]], reverse=True)
+        others.sort(key=lambda rc: key_matrix[rc[0]][rc[1]], reverse=True)
 
-        for dist in range(max_dist + 1):
-            ordered_moves.extend(candidates_by_dist[dist])
-
-        for dist in range(max_dist + 1):
-            ordered_moves.extend(others_by_dist[dist])
-
-        # Primero todos los que tocan algo, luego el resto.
-        return set(ordered_moves)
+        # Adjacent primero, luego las demás
+        return adjacent + others
 
 class Minimax:
     """
@@ -580,6 +538,19 @@ class Minimax:
     threats = 1        # celdas amenazadas
     territory = 1      # dominio general sobre el tablero
     ctrl_board = 45    # factor de control territorial (activa el cambio de estrategia)
+    
+    @staticmethod
+    def calculate_depth_simple(size: int, move_counter: int) -> int:
+        value = size*size - move_counter
+        
+        if value <= 12:
+            return 9
+        elif value <= 14:
+            return 7
+        elif value <= 49:
+            if size <= 6 or (size==7 and value > 28):
+                return 5
+        return 3
     
     @staticmethod
     def set_weights(*weights, graph: Optional["HexGraph"] = None) -> None:
@@ -657,13 +628,7 @@ class Minimax:
     def preminimax(graph: "HexGraph", board: HexBoard) -> Optional[Tuple[int, int]]:
         """
         Selecciona una profundidad adecuada en función del tamaño del grafo
-        y llama a `minimax`. Retorna el (valor, mejor_jugada).
-
-        Reglas de profundidad:
-        - size <= 3  -> profundidad 11
-        - 4 <= size <=5 -> profundidad 5
-        - 6 <= size <=8 -> profundidad 3
-        - por defecto -> profundidad 3
+        y del momento, llama a `minimax`. Retorna el (valor, mejor_jugada).
         """
         # Detectar movimiento del oponente
         graph.detect_opponent_move(board)  
@@ -673,16 +638,11 @@ class Minimax:
         
         size = graph.size
         
-        if size <= 3:
-            profundidad = 11
-        elif 4 <= size <= 5:
-            profundidad = 5
-        elif 6 <= size <= 11:
-            profundidad = 3
+        deep = Minimax.calculate_depth_simple(size, graph.move_counter)
 
         _, best_move = Minimax.minimax(
             turno=0,
-            profundidad=profundidad,
+            profundidad=deep,
             graph=graph,
         )
         
@@ -700,15 +660,15 @@ class Minimax:
         alpha: int = -sys.maxsize - 1,
         beta: int = sys.maxsize,
         maximizing: bool = True,
-        moves: Optional[Set[Tuple[int, int]]] = None,
-    ) -> Tuple[float, Optional[Tuple[int, int]], float]:
+        moves: Optional[list[Tuple[int, int]]] = None,
+    ) -> Tuple[float, Optional[Tuple[int, int]]]:
         """
         Minimax. Retorna (valor, mejor_jugada, promedio_de_hijos_directos).
         """
         if moves is None:
             moves = graph.get_ordered_moves()
-            
-        if turno >= profundidad-1 or not moves:
+
+        if turno >= profundidad - 1 or not moves:
             val = Minimax.calculate_heuristic(graph, moves)
             leaf_val = 0.0 if val is None else float(val)
             return leaf_val, None
@@ -718,14 +678,15 @@ class Minimax:
         if maximizing:
             max_eval = -sys.maxsize - 1
 
-            for r, c in moves:
-                
+            for idx in range(len(moves)):
+                r, c = moves[idx]
+
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.player)
 
-                # Remover la casilla libre
-                moves.remove((r, c))
-               
+                # Crear la lista de movimientos restante sin mutar la original
+                remaining_moves = moves[:idx] + moves[idx + 1 :]
+
                 eval, _ = Minimax.minimax(
                     turno + 1,
                     profundidad,
@@ -733,20 +694,17 @@ class Minimax:
                     alpha,
                     beta,
                     False,
-                    moves,
+                    remaining_moves,
                 )
-                
-                # Volver a agregar la casilla libre para el siguiente hijo
-                moves.add((r, c))
-                
+
                 # Desmarcar después de evaluar
-                graph.mark_node_at(r, c, graph.player, mark=False)  
-                
+                graph.mark_node_at(r, c, graph.player, mark=False)
+
                 if eval > max_eval:
                     max_eval = eval
                     if turno == 0:
                         best_move = (r, c)
- 
+
                 alpha = max(alpha, eval)
                 if beta <= alpha:
                     break
@@ -755,14 +713,14 @@ class Minimax:
 
         else:
             min_eval = sys.maxsize
-            
-            for r, c in moves:
 
-                # Marcar la jugada
+            for idx in range(len(moves)):
+                r, c = moves[idx]
+
+                # Marcar la jugada del oponente
                 graph.mark_node_at(r, c, graph.opp)
 
-                #remaining_moves = moves - {(r, c)}
-                moves.remove((r, c))
+                remaining_moves = moves[:idx] + moves[idx + 1 :]
 
                 eval, _ = Minimax.minimax(
                     turno + 1,
@@ -771,12 +729,9 @@ class Minimax:
                     alpha,
                     beta,
                     True,
-                    moves,
+                    remaining_moves,
                 )
 
-                # Volver a agregar la casilla libre para el siguiente hijo
-                moves.add((r, c))
-                
                 # Desmarcar después de evaluar
                 graph.mark_node_at(r, c, graph.opp, mark=False)
 
@@ -786,4 +741,8 @@ class Minimax:
                 beta = min(beta, eval)
                 if beta <= alpha:
                     break
+
             return float(min_eval), best_move
+
+# Second Strategy
+#-----------------------------------------------------------------------

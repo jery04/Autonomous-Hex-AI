@@ -335,7 +335,7 @@ class HexGUI:
 		self.root.mainloop()
 
 def main() -> None:
-	app = HexGUI(size=7)
+	app = HexGUI(size=3)
 	app.run()
 
 if __name__ == "__main__":
