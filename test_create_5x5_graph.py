@@ -18,15 +18,15 @@ def test_create_5x5_graph():
     b1.mark_node_at(3, 2, 1)
     b1.mark_node_at(3, 4, 1)
 
-    #d1,d2 = b1.distance_between_extremes(1)
-    #print("distance_between_extremes:", d1, d2)
+    d1 = b1.distance_between_extremes(2)
+    print("distance_between_extremes:", d1)
     #print("position:", d2)
 
     #print(b1.move_counter)
     #print(b1.territorial_control(1,4, 1, True))
     #start = time.perf_counter()
-    components, max = b1.count_components(2)
-    print("count_components:", components, "max component size:", max)
+    #components, max = b1.count_components(2)
+    #print("count_components:", components, "max component size:", max)
     #elapsed = time.perf_counter() - start
     #print(f"count_components result: {components}  time: {elapsed:.6f}s")
     

@@ -71,9 +71,22 @@ class HexGraph:
         self.node_up: Optional[Node] = None
         self.node_bottom: Optional[Node] = None
         self.opp: Optional[int] = None
+        self.center_dom_self = 0.0
+        self.center_dom_opp = 0.0
+        self.edges_dom_self = 0.0
+        self.edges_dom_opp = 0.0
+        self.matrix_center = None
+        self.matrix_edges_self = None
+        self.matrix_edges_opp = None
         self.create_node_matrix()
         self.move_counter = 0
 
+    def get_dom(self, player_id: int):
+        if player_id == self.player:
+            return round(self.center_dom_self if self.move_counter <= Minimax.ctrl_board else self.edges_dom_self, 2)
+        
+        return round(self.center_dom_opp if self.move_counter <= Minimax.ctrl_board else self.edges_dom_opp, 2)
+    
     def detect_opponent_move(self, board: HexBoard) -> None:
         """
         Recibe un `HexBoard` y devuelve la coordenada (row, col) de una nueva 
@@ -155,10 +168,20 @@ class HexGraph:
         # Guardar el id del jugador, pero no usarlo para decidir qué extremos
         # conectar: creamos los cuatro nodos extremos y los enlazamos todos.
         self.opp = 2 if self.player == 1 else 1
+        self.matrix_center = [[0 for _ in range(self.size)] for _ in range(self.size)]
+        self.matrix_edges_self = [[0 for _ in range(self.size)] for _ in range(self.size)]
+        self.matrix_edges_opp = [[0 for _ in range(self.size)] for _ in range(self.size)]
 
         for r in range(self.size):
             for c in range(self.size):
                 self.free_cells.add((r, c))
+                
+                # Territorial
+                self.matrix_center[r][c] = self.territorial_control(r,c)
+                self.matrix_edges_opp[r][c] = self.territorial_control(r,c,self.opp)
+                self.matrix_edges_self[r][c] = self.territorial_control(r,c,self.player)
+                
+                # Neighbors 
                 neigh_coords = self._neighbors(r, c)
                 node = matrix[r][c]
                 node.neighbors = []
@@ -193,7 +216,7 @@ class HexGraph:
         self.matrix = matrix
         return matrix
 
-    def mark_node_at(self, r: int, c: int, player_id: Optional[int] = None) -> None:
+    def mark_node_at(self, r: int, c: int, player_id: int = None, mark: bool = True) -> None:
         """
         Marca o desmarca el nodo en (r, c).
 
@@ -207,15 +230,19 @@ class HexGraph:
         node = self.matrix[r][c]
 
         # Desmarcar (player_id is None)
-        if player_id is None:
-            # Solo decrementar contador si antes estaba marcado.
-            if node.marked != 0:
-                self.move_counter -= 1
-                # Quitar de los sets correspondientes
-                if node.marked == self.player:
-                    self.player_cells.discard((r, c))
-                elif node.marked == self.opp:
-                    self.opp_cells.discard((r, c))
+        if not mark and node.marked != 0:
+            
+            self.move_counter -= 1
+            # Quitar de los sets correspondientes
+            if self.player == player_id:
+                self.player_cells.discard((r, c))
+                self.edges_dom_self -= self.matrix_edges_self[r][c]
+                self.center_dom_self -= self.matrix_center[r][c]
+                    
+            else:
+                self.opp_cells.discard((r, c))
+                self.edges_dom_opp -= self.matrix_edges_opp[r][c]
+                self.center_dom_opp -= self.matrix_center[r][c]  
 
             node.marked = 0
             # Añadir a free_cells
@@ -229,8 +256,12 @@ class HexGraph:
             # Añadir a los sets correspondientes
             if player_id == self.player:
                 self.player_cells.add((r, c))
-            elif player_id == self.opp:
+                self.edges_dom_self += self.matrix_edges_self[r][c]
+                self.center_dom_self += self.matrix_center[r][c]
+            else:
                 self.opp_cells.add((r, c))
+                self.edges_dom_opp += self.matrix_edges_opp[r][c]
+                self.center_dom_opp += self.matrix_center[r][c]
         
     def territorial_control(self, r: int, c: int, player: int = None) -> float:
         """
@@ -243,7 +274,7 @@ class HexGraph:
             - Jugador 2: arriba-abajo.
         """
         
-        if self.move_counter <  math.floor(self.size * self.size * Minimax.ctrl_board / 100):
+        if player is None:
             cr = (self.size - 1) // 2
             cc = (self.size - 1) // 2
 
@@ -257,8 +288,8 @@ class HexGraph:
 
             # Normalizamos e invertimos (mas cerca -> valor mas alto).
             cercania = 1.0 - (distancia / dist_max)
-            return max(0.0, min(1.0, cercania))
-
+            return round(max(0.0, min(1.0, cercania)),2)
+        
         # Estrategia por bordes segun orientacion del jugador.
         if player == 1:
             # Jugador 1 conecta izquierda-derecha: importa la distancia al
@@ -274,7 +305,7 @@ class HexGraph:
             return 1.0
 
         cercania_borde = 1.0 - (nearest_border_dist / max_nearest_dist)
-        return max(0.0, min(1.0, cercania_borde))
+        return round(max(0.0, min(1.0, cercania_borde)), 2)
 
     def distance_between_extremes(self, player_id: int) -> Optional[Tuple[int, float]]:
         """
@@ -302,9 +333,6 @@ class HexGraph:
         if a is None or b is None:
             return None
 
-        position = 0.0
-        # Evita contar dos veces el mismo nodo propio en distintas rutas/relajaciones.
-        counted_nodes: Set[Node] = set()
         q = deque([a])
         distances = {a: 0}
 
@@ -320,11 +348,6 @@ class HexGraph:
                 if neigh_mark not in (0, player_id):
                     continue
 
-                if neigh_mark == player_id and neigh not in counted_nodes:
-                    if 0 <= neigh.r < self.size and 0 <= neigh.c < self.size:
-                        position += self.territorial_control(neigh.r, neigh.c, player_id)
-                    counted_nodes.add(neigh)
-
                 step = 0 if neigh_mark == player_id else 1
                 candidate = current_dist + step
 
@@ -337,10 +360,9 @@ class HexGraph:
                         q.append(neigh)
 
         if b not in distances:
-            return None, position
+            return None
         
-        result = max(distances[b], 0)
-        return result, position
+        return max(distances[b], 0)
 
     def count_components(self, player: int) -> Tuple[int, int]:
         """
@@ -557,7 +579,7 @@ class Minimax:
     max_component = 1  # cardinalidad de componente más grande
     threats = 1        # celdas amenazadas
     territory = 1      # dominio general sobre el tablero
-    ctrl_board = 45    # factor de control territorial (celdas cercanas al centro o bordes relevantes)
+    ctrl_board = 45    # factor de control territorial (activa el cambio de estrategia)
     
     @staticmethod
     def set_weights(*weights, graph: Optional["HexGraph"] = None) -> None:
@@ -607,23 +629,22 @@ class Minimax:
             weights = random.choice(presets)
 
         Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
+        Minimax.ctrl_board = math.floor((Minimax.ctrl_board / 100) * graph.size * graph.size)
     
     @staticmethod
     def calculate_heuristic(graph: HexGraph, free_node: Optional[Iterable[Tuple[int, int]]] = None) -> Optional[int]:
-        if graph is None:
-            return None
 
-        if graph.player not in (1, 2) or graph.opp not in (1, 2):
-            return None
-            
-        dist_self, board_dom_self  = graph.distance_between_extremes(graph.player)
-        dist_opp, board_dom_opp = graph.distance_between_extremes(graph.opp)
+        dist_self  = graph.distance_between_extremes(graph.player)
+        dist_opp = graph.distance_between_extremes(graph.opp)
             
         comp_num_self, max_card_self = graph.count_components(graph.player)
         comp_num_opp, max_card_opp = graph.count_components(graph.opp) 
         
         threat_cells_self = graph.count_threatened_free_nodes(graph.player, free_node)
         threat_cells_opp = graph.count_threatened_free_nodes(graph.opp, free_node)
+        
+        board_dom_self = graph.get_dom(graph.player)
+        board_dom_opp = graph.get_dom(graph.opp)
         
         if dist_self is None:
             return -10000
@@ -644,8 +665,7 @@ class Minimax:
         - 6 <= size <=8 -> profundidad 3
         - por defecto -> profundidad 3
         """
-
-        # Sincronizar grafos con el tablero actual
+        # Detectar movimiento del oponente
         graph.detect_opponent_move(board)  
 
         # Ajustar pesos según el torneo (pasamos el grafo para decidir presets)
@@ -656,7 +676,7 @@ class Minimax:
         if size <= 3:
             profundidad = 11
         elif 4 <= size <= 5:
-            profundidad = 3
+            profundidad = 5
         elif 6 <= size <= 11:
             profundidad = 3
 
@@ -702,6 +722,7 @@ class Minimax:
                 
                 # Marcar la jugada
                 graph.mark_node_at(r, c, graph.player)
+
                 # Remover la casilla libre
                 moves.remove((r, c))
                
@@ -719,7 +740,7 @@ class Minimax:
                 moves.add((r, c))
                 
                 # Desmarcar después de evaluar
-                graph.mark_node_at(r, c, None)  
+                graph.mark_node_at(r, c, graph.player, mark=False)  
                 
                 if eval > max_eval:
                     max_eval = eval
@@ -757,7 +778,7 @@ class Minimax:
                 moves.add((r, c))
                 
                 # Desmarcar después de evaluar
-                graph.mark_node_at(r, c, None)
+                graph.mark_node_at(r, c, graph.opp, mark=False)
 
                 if eval < min_eval:
                     min_eval = eval
