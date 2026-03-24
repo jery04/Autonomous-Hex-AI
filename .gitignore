@@ -6,5 +6,6 @@
 
 # Unignore specific files at repo root
 !/strategy.pdf
+!/README.md
 !/solution.py
 !/genetic_algorithm.py
