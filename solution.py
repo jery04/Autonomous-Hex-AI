@@ -656,7 +656,7 @@ class Minimax:
         if size <= 3:
             profundidad = 11
         elif 4 <= size <= 5:
-            profundidad = 5
+            profundidad = 3
         elif 6 <= size <= 11:
             profundidad = 3
 

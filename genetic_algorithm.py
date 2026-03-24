@@ -5,11 +5,12 @@ from typing import List, Tuple
 from multiprocessing import Pool, cpu_count
 from solution import Minimax, HexGraph
 from board import HexBoard
+import math
 
 Vector = List[float]
 
 # Opponent center vector: opponents will be sampled in a neighbourhood around this
-OPPONENT_CENTER = [16.9283, 2.8124, 5.1506, 16.7625, 1, 3.4640]
+OPPONENT_CENTER = [16.9283, 2.8124, 5.1506, 16.7625, 1, 43.4640]
 
 RANGES = [
     (50.0,  350.0),   # a  → distancia (el rey absoluto, casi siempre el más alto)
@@ -44,7 +45,7 @@ def random_vector() -> Vector:
 def set_weights(weights: Vector) -> None:
     Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
 
-def play_match(size: int, w1: Vector, w2: Vector) -> int:
+def play_match(size: int, w1: Vector, w2: Vector, mitad: bool = True) -> int:
     """Play one game and return only the winner id (1 or 2).
 
     Returns 0 for draws or aborted games.
@@ -83,7 +84,15 @@ def play_match(size: int, w1: Vector, w2: Vector) -> int:
         r, c = move
         board.place_piece(r, c, pid)
 
-        if board.check_connection(pid):
+        if mitad and g1.move_counter >= math.floor(0.32*size*size):
+            var  = Minimax.calculate_heuristic(g1, g1.free_cells)
+            if var > 0:
+                return 1
+            elif var < 0: 
+                return 2
+            else: mitad = False
+        
+        elif not mitad and board.check_connection(pid):
             return pid
 
         turn = 1 - turn
@@ -119,7 +128,7 @@ def fitness(individuo: Vector, n_games: int = 30, p1: float = 0.5, p2: float = 0
     return wins / n_games * 100.0
 
 def init_population(pop_size: int) -> List[List[float]]:
-    return [random_vector() for _ in range(pop_size)]
+    return [neighbor_vector(OPPONENT_CENTER, 100) for _ in range(pop_size)]
 
 def tournament_selection(pop: List[Vector], fitnesses: List[float], k: int = 3) -> Vector:
     selected = random.sample(range(len(pop)), k)
@@ -149,7 +158,7 @@ def ga_optimize(
     seed: int = None,
     top_frac: float = 0.05,
     n_games: int = 24,
-    board_sizes: List[int] = [5],
+    board_sizes: List[int] = [5, 4],
 ):
     if seed is not None:
         random.seed(seed)
@@ -210,10 +219,10 @@ def ga_optimize(
 
 def main():
     parser = argparse.ArgumentParser(description="GA tuner for Minimax weights (a..f) based on match win rate")
-    parser.add_argument("--pop", type=int, default=30)
-    parser.add_argument("--gen", type=int, default=10)
-    parser.add_argument("--pc", type=float, default=0.65)
-    parser.add_argument("--pm", type=float, default=0.18)
+    parser.add_argument("--pop", type=int, default=60)
+    parser.add_argument("--gen", type=int, default=14)
+    parser.add_argument("--pc", type=float, default=0.8)
+    parser.add_argument("--pm", type=float, default=0.05)
     parser.add_argument("--n_games", type=int, default=71)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
@@ -236,7 +245,7 @@ def main():
         pm=args.pm,
         seed=args.seed,
         n_games=args.n_games,
-        top_frac=0.1,
+        top_frac=0.18,
         board_sizes=sizes,
     )
     elapsed = time.time() - t0
