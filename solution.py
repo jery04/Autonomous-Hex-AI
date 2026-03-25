@@ -466,9 +466,9 @@ class HexGraph:
         use_center = self.move_counter <= Minimax.ctrl_board
         key_matrix = self.matrix_center if use_center else self.matrix_edges_self
 
-
         adjacent: list[Tuple[int, int]] = []
         others: list[Tuple[int, int]] = []
+        priority: list[Tuple[int, int]] = []
 
         for (r, c) in self.free_cells:
             is_adjacent = False
@@ -479,9 +479,10 @@ class HexGraph:
                         is_priority = True
                         break
                     is_adjacent = True
+                    break
                         
             if is_priority:
-                adjacent.insert(0,(r,c))
+                priority.append((r, c))
             elif is_adjacent:
                 adjacent.append((r, c))
             else:
@@ -490,9 +491,10 @@ class HexGraph:
         # Ordenar cada grupo de mayor a menor según la matriz seleccionada
         adjacent.sort(key=lambda rc: key_matrix[rc[0]][rc[1]], reverse=True)
         others.sort(key=lambda rc: key_matrix[rc[0]][rc[1]], reverse=True)
+        priority.sort(key=lambda rc: key_matrix[rc[0]][rc[1]], reverse=True)
 
         # Adjacent primero, luego las demás
-        return adjacent + others
+        return priority + adjacent + others
 
 class Minimax:
     """Static minimax engine and heuristic configuration.

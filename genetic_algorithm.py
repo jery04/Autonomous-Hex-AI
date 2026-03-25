@@ -13,12 +13,12 @@ Vector = List[float]
 OPPONENT_CENTER = [16.9283, 2.8124, 5.1506, 16.7625, 1, 43.4640]
 
 RANGES = [
-    (50.0,  350.0),   # a  → distancia (el rey absoluto, casi siempre el más alto)
-    (5.0,   120.0),   # b  → comp_opp - comp_self (penaliza fragmentación)
-    (5.0,   100.0),   # c  → max_comp_self - max_comp_opp (premia cadenas largas)
-    (10.0,  250.0),   # d  → threats_opp - threats_self (amenazas suelen ser críticas)
-    (0.0,   80.0),    # e  → dom_self - dom_opp (dominio territorial, suele pesar menos)
-    (3.0, 65.0),      # f
+    (5.0,  27.0),   # a  → distancia (el rey absoluto, casi siempre el más alto)
+    (0.0,   13.0),   # b  → comp_opp - comp_self (penaliza fragmentación)
+    (0.0,   16.0),   # c  → max_comp_self - max_comp_opp (premia cadenas largas)
+    (5.0,  27.0),   # d  → threats_opp - threats_self (amenazas suelen ser críticas)
+    (0.0,   10.0),    # e  → dom_self - dom_opp (dominio territorial, suele pesar menos)
+    (20.0, 40.0),      # f
 ]
 
 def neighbor_vector(center: Vector, delta: float = 10.0) -> Vector:
@@ -45,7 +45,7 @@ def random_vector() -> Vector:
 def set_weights(weights: Vector) -> None:
     Minimax.distance, Minimax.components, Minimax.max_component, Minimax.threats, Minimax.territory, Minimax.ctrl_board = weights
 
-def play_match(size: int, w1: Vector, w2: Vector, mitad: bool = True) -> int:
+def play_match(size: int, w1: Vector, w2: Vector, mitad: bool = False) -> int:
     """Play one game and return only the winner id (1 or 2).
 
     Returns 0 for draws or aborted games.
@@ -60,12 +60,17 @@ def play_match(size: int, w1: Vector, w2: Vector, mitad: bool = True) -> int:
         r = random.randint(0, size - 1)
         c = random.randint(0, size - 1)
         g1.mark_node_at(r, c, 1)
+        g1.last_move_own = (r,c)
         board.place_piece(r, c, 1)
+        
     else:
         r = random.randint(0, size - 1)
         c = random.randint(0, size - 1)
         g2.mark_node_at(r, c, 2)
+        g2.last_move_own = (r,c)
         board.place_piece(r, c, 2)
+        
+    turn = 1 - turn
 
     for _ in range(max_moves):
         move_t0 = time.time()
@@ -128,7 +133,7 @@ def fitness(individuo: Vector, n_games: int = 30, p1: float = 0.5, p2: float = 0
     return wins / n_games * 100.0
 
 def init_population(pop_size: int) -> List[List[float]]:
-    return [neighbor_vector(OPPONENT_CENTER, 100) for _ in range(pop_size)]
+    return [random_vector() for _ in range(pop_size)]
 
 def tournament_selection(pop: List[Vector], fitnesses: List[float], k: int = 3) -> Vector:
     selected = random.sample(range(len(pop)), k)
@@ -151,14 +156,14 @@ def mutate(ind: Vector, pm: float, sigma: float = 6.0) -> None:
             ind[i] = max(lo, min(hi, ind[i]))
 
 def ga_optimize(
-    pop_size: int = 160,
+    pop_size: int = 60,
     generations: int = 20,
-    pc: float = 0.75,
+    pc: float = 0.8,
     pm: float = 0.18,
     seed: int = None,
     top_frac: float = 0.05,
-    n_games: int = 24,
-    board_sizes: List[int] = [5, 4],
+    n_games: int = 71,
+    board_sizes: List[int] = [5],
 ):
     if seed is not None:
         random.seed(seed)
@@ -220,7 +225,7 @@ def ga_optimize(
 def main():
     parser = argparse.ArgumentParser(description="GA tuner for Minimax weights (a..f) based on match win rate")
     parser.add_argument("--pop", type=int, default=60)
-    parser.add_argument("--gen", type=int, default=14)
+    parser.add_argument("--gen", type=int, default=20)
     parser.add_argument("--pc", type=float, default=0.8)
     parser.add_argument("--pm", type=float, default=0.05)
     parser.add_argument("--n_games", type=int, default=71)
@@ -228,7 +233,7 @@ def main():
     parser.add_argument(
         "--sizes",
         type=str,
-        default="5,4",
+        default="5",
         help="Comma-separated list of board sizes to evaluate, e.g. 3",
     )
     args = parser.parse_args()
@@ -245,7 +250,7 @@ def main():
         pm=args.pm,
         seed=args.seed,
         n_games=args.n_games,
-        top_frac=0.18,
+        top_frac=0.05,
         board_sizes=sizes,
     )
     elapsed = time.time() - t0
