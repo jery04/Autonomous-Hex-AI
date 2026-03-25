@@ -31,7 +31,7 @@ class SmartPlayer(Player):
             # Sincronizar y actualizar grafos a partir del tablero
             if self.graph is None or self.graph.is_different_board(board):
                 self.graph = HexGraph(size=board.size, player_id=self.player_id)
-                
+
             # Usar preminimax para elegir profundidad según tamaño
             return Minimax.preminimax(self.graph, board)
         else:
@@ -95,6 +95,8 @@ class HexGraph:
         self.matrix_edges_opp = None
         self.create_node_matrix()
         self.move_counter = 0
+        self.last_move_opp = (-1,-1)
+        self.last_move_own = (-1,-1)
 
     def get_dom(self, player_id: int):
         """Return rounded territorial dominance for the requested player.
@@ -111,6 +113,7 @@ class HexGraph:
         for (r, c) in self.free_cells:
             if board.board[r][c] != 0:
                 self.mark_node_at(r, c, self.opp)
+                self.last_move_opp = (r, c)
                 return None
             
         return None
@@ -458,23 +461,28 @@ class HexGraph:
         """Return legal moves ordered by tactical proximity and positional value.
         Adjacent free cells come first, then both groups are sorted by the active scoring matrix."""
         size = self.size
-
+        
         # Escoger la matriz de valores a usar según el control del tablero
         use_center = self.move_counter <= Minimax.ctrl_board
         key_matrix = self.matrix_center if use_center else self.matrix_edges_self
+
 
         adjacent: list[Tuple[int, int]] = []
         others: list[Tuple[int, int]] = []
 
         for (r, c) in self.free_cells:
             is_adjacent = False
+            is_priority = False
             for nr, nc in self._neighbors(r, c):
-                if 0 <= nr < size and 0 <= nc < size:
-                    if self.matrix[nr][nc].marked != 0:
-                        is_adjacent = True
+                if (0 <= nr < size and 0 <= nc < size) and self.matrix[nr][nc].marked != 0:
+                    if (nr,nc) == self.last_move_opp or (nr,nc) == self.last_move_own:
+                        is_priority = True
                         break
-
-            if is_adjacent:
+                    is_adjacent = True
+                        
+            if is_priority:
+                adjacent.insert(0,(r,c))
+            elif is_adjacent:
                 adjacent.append((r, c))
             else:
                 others.append((r, c))
@@ -496,7 +504,7 @@ class Minimax:
     threats = 1        # celdas amenazadas
     territory = 1      # dominio general sobre el tablero
     ctrl_board = 45    # factor de control territorial (activa el cambio de estrategia)
-    
+
     @staticmethod
     def calculate_depth_simple(size: int, move_counter: int) -> int:
         """Choose a search depth from board size and remaining cells.
@@ -601,6 +609,7 @@ class Minimax:
         
         if best_move is not None:
             graph.mark_node_at(*best_move, graph.player)
+            graph.last_move_own = best_move
             return best_move
         
         return None
