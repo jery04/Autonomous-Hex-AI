@@ -516,7 +516,7 @@ class Minimax:
         elif value <= 14:
             return 7
         elif value <= 49:
-            if size <= 6 or (size==7 and value > 38):
+            if size <= 6 or (size==7 and value > 42):
                 return 5
         return 3
     
