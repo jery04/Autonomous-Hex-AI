@@ -1,4 +1,5 @@
 Artificial Intelligence Project: HEX — Autonomous Hex Player 🧠♟️🔷🚀🧪
+--------
 
 “Those who are crazy enough to think they can change the world are the ones who do.” — Steve Jobs 💡
 
